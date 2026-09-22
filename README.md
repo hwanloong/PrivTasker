@@ -474,5 +474,4 @@ flutter test test/markdown_preview_test.dart --update-goldens  # Markdown + 公�
 
 ## 许可
 
-个人自用项目，未声明开源许可。内置字体（Times New Roman / 宋体 / Consolas）
-版权归各自权利人，仅供本地个人使用。
+字体仅作效果。实际不参与商业用途。详细见LICENSE
