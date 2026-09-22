@@ -1,5 +1,7 @@
 # PrivTasker
 
+![picture](https://github.com/hwanloong/PrivTasker/blob/main/new_icon.png)
+
 > 跑在 Android 手机上的 AI Agent。能对话、能调工具、能实际操作系统 —— 而不只是聊天。
 
 一个自用的实验性项目：把大模型接到 `Shizuku` 上，让 AI 真的能在手机上执行命令、管理应用、
