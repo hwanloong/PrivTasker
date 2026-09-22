@@ -46,6 +46,8 @@
 
 ## 界面
 
+![picture](https://github.com/hwanloong/PrivTasker/blob/main/sc.png)
+
 三个底部标签：**对话 / 笔记 / 任务**。
 
 设计取向是**克制**：
