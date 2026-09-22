@@ -1,0 +1,84 @@
+name: dsh_agent
+description: "DSH Agent — 手机上的 AI agent，通过 Shizuku 调用系统能力"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # 网络：调用 DeepSeek / 搜索 API / 视觉 API
+  http: ^1.2.2
+  # 设置持久化（API key、模型、开关）
+  shared_preferences: ^2.3.2
+  # 应用私有目录，用于存放截图、录屏、插件
+  path_provider: ^2.1.4
+  # 选取本地图片做识图
+  image_picker: ^1.1.2
+  # 选取任意文件发送给模型（文档、日志、代码等）
+  file_selector: ^1.0.3
+  # 内置浏览器。用它做搜索抓取：WebView 是真实浏览器环境
+  # （真 UA、执行 JS、带 Cookie、家用 IP），能绕开服务端抓取被反爬拦掉的问题。
+  flutter_inappwebview: ^6.1.5
+  # 打开 AI 回复里的链接
+  url_launcher: ^6.3.0
+  # LaTeX 数学公式渲染。选它是因为**纯 Dart、无原生代码**，
+  # 不会引入 AGP/NDK 层面的构建兼容问题。
+  flutter_math_fork: ^0.7.2
+  # 离线 OCR（识图工具的本地方案，不需要额外 API key）
+  google_mlkit_text_recognition: ^0.13.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+dependency_overrides:
+  # 上游 flutter_inappwebview_android 1.1.3 的 android/build.gradle 用了
+  # AGP 9 已移除的 getDefaultProguardFile('proguard-android.txt')，会直接导致
+  # 构建失败。6.1.5 已是最新稳定版，没有兼容 AGP 9 的版本可用，
+  # 而本项目的构建链沿用 pj1 已验证的 AGP 9.1.0，所以把插件 vendor 到
+  # third_party/ 并打了补丁。详见 third_party/flutter_inappwebview_android/VENDORED.md
+  flutter_inappwebview_android:
+    path: third_party/flutter_inappwebview_android
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    # 英文正文：Times New Roman
+    # 通过 AppTheme 里的 fontFamily + fontFamilyFallback 组合，
+    # 实现「英文走 Times、中文走宋体」的混排效果。
+    - family: TimesNewRoman
+      fonts:
+        - asset: assets/fonts/times.ttf
+        - asset: assets/fonts/timesbd.ttf
+          weight: 700
+        - asset: assets/fonts/timesi.ttf
+          style: italic
+        - asset: assets/fonts/timesbi.ttf
+          weight: 700
+          style: italic
+
+    # 中文正文：宋体（SimSun）
+    # simsun.ttc 是字体集合，已用 tools/extract_ttc.dart 抽出独立 TTF，
+    # 避免 Flutter 对 .ttc 支持不确定导致中文静默回退成黑体。
+    - family: SimSun
+      fonts:
+        - asset: assets/fonts/simsun.ttf
+
+    # 代码块：Consolas
+    - family: Consolas
+      fonts:
+        - asset: assets/fonts/consola.ttf
+        - asset: assets/fonts/consolab.ttf
+          weight: 700
+        - asset: assets/fonts/consolai.ttf
+          style: italic

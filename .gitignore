@@ -1,0 +1,69 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Widget Preview related
+.widget_preview/
+
+# ---------------------------------------------------------------------------
+# 字体（重要）
+#
+# Times New Roman / 宋体 / Consolas 都是商业专有字体，授权范围不包括再分发。
+# 打进公开仓库或公开分发带字体的产物都属于侵权，所以这里排除掉。
+# 仓库里只保留 assets/fonts/README.md 说明如何自行准备。
+#
+# 注意：被忽略后本机仍可正常构建（文件还在），只是不会被提交。
+# ---------------------------------------------------------------------------
+/assets/fonts/*.ttf
+/assets/fonts/*.ttc
+/assets/fonts/*.otf
+
+# 本地工作产物
+/_tmp/
+/icon/gen/
+
+# golden 测试失败时生成的对比图（masterImage / testImage / maskedDiff …）
+# 这些是排查用的临时产物，不该进仓库
+/test/failures/

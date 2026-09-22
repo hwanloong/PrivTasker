@@ -1,6 +1,8 @@
-# PrivTasker
+<p align="center">
+  <img src="docs/images/icon.png" width="104" alt="PrivTasker 图标">
+</p>
 
-![picture](https://github.com/hwanloong/PrivTasker/blob/main/new_icon.png)
+# PrivTasker
 
 > 跑在 Android 手机上的 AI Agent。能对话、能调工具、能实际操作系统 —— 而不只是聊天。
 
@@ -27,6 +29,7 @@
 - [踩过的坑](#踩过的坑)
 - [验证状态](#验证状态)
 - [已知限制](#已知限制)
+- [许可](#许可)
 
 ---
 
@@ -48,9 +51,15 @@
 
 ## 界面
 
-![picture](https://github.com/hwanloong/PrivTasker/blob/main/sc.png)
-
 三个底部标签：**对话 / 笔记 / 任务**。
+
+<p align="center">
+  <img src="docs/images/chat-light.png" width="250" alt="对话界面（亮色）">
+  &nbsp;&nbsp;
+  <img src="docs/images/chat-dark.png" width="250" alt="对话界面（暗色）">
+  <br>
+  <em>对话界面（左：亮色 / 右：暗色，跟随系统）</em>
+</p>
 
 设计取向是**克制**：
 
@@ -60,7 +69,26 @@
 - **玻璃效果只用在顶部导航栏和底部输入栏** —— 因为只有内容从下面滚过时才有真正的模糊穿透。
   纯色背景上静态看它和背景同色，这是对的，不是没做。
 
-AI 的回复**没有气泡**，Markdown 直接平铺在背景上（标题、列表、表格、代码块、公式、链接都支持）。
+AI 的回复**没有气泡**，Markdown 直接平铺在背景上（标题、列表、表格、代码块、公式、链接都支持）：
+
+<p align="center">
+  <img src="docs/images/markdown.png" width="330" alt="Markdown 渲染：标题、表格、行内代码、代码块、数学公式">
+  <br>
+  <em>Markdown 渲染：表格、行内代码、代码块、行内/行间 LaTeX 公式</em>
+</p>
+
+网页/接口抓取的结果会显示成一张可展开的卡片，并带「内嵌预览」按钮：
+
+<p align="center">
+  <img src="docs/images/web-card.png" width="330" alt="插入网页内容：Mapbox API 返回的 JSON">
+  <br>
+  <em>插入网页内容：抓到的 JSON 会美化后作为消息内容发给模型</em>
+</p>
+
+> **这些图不是设计稿，是用真实 Flutter 控件渲染出来的。**
+> 借 `flutter_test` 的渲染管线出图并显式加载字体，所以字体、间距、配色和真机一致。
+> 重新生成：`flutter test test/ui_preview_test.dart --update-goldens`
+> （详见 [开发与构建](#开发与构建)）
 
 ---
 
@@ -320,6 +348,7 @@ dsh_agent/
 │   ├── MainActivity.kt            通道注册
 │   ├── ShizukuBridge.kt           命令执行桥
 │   └── OverlayConfirm.kt          系统悬浮窗
+├── docs/images/                   README 用的界面图（由测试渲染生成）
 ├── test/                          6 个测试文件，共 47 个测试
 ├── tools/extract_ttc.dart         宋体 TTC 提取器
 └── third_party/                   vendored 插件（见「踩过的坑」）
@@ -442,12 +471,14 @@ flutter test test/markdown_preview_test.dart --update-goldens  # Markdown + 公�
 | 服务端搜索结果判定 | ✅ 有单测 |
 | 提示注入清洗 | ✅ 有单测（含防误伤） |
 | 风险分级器 | ✅ 有单测 |
-| **Shizuku 实际执行链路** | ？ **可执行但可靠性不清** |
-| **悬浮窗权限流程** | ✅ **偶尔抽风？** |
-| **内置浏览器抓取** | ？ **稳定性不佳** |
+| **Shizuku 实际执行链路** | ❌ **没有真机验证过** |
+| **悬浮窗权限流程** | ❌ **没有真机验证过** |
+| **内置浏览器抓取** | ❌ **没有真机验证过**（只验了诊断输出） |
 | **Tavily 通道** | ❌ 没测过（需要 Key） |
-| **自建搜索服务** | ✅ **正常访问，但建议求证** |
+| **自建搜索服务** | ❌ 没测过（需要部署） |
 
+**没有真机验证的部分是最大的不确定性。** 代码能编译、能通过分析、界面能渲染，
+但 Android 运行时行为（尤其是 Shizuku 授权和 WebView）只能在实际设备上确认。
 
 ---
 
@@ -474,4 +505,19 @@ flutter test test/markdown_preview_test.dart --update-goldens  # Markdown + 公�
 
 ## 许可
 
-字体仅作效果。实际不参与商业用途。详细见LICENSE
+本项目源码采用 [MIT 许可](LICENSE)。
+
+**但有一件事必须单独说明：字体不包含在本仓库中。**
+
+界面用到的 Times New Roman / 宋体 / Consolas 都是**商业专有字体**
+（Monotype / 中易中标 / Microsoft），授权范围不包括再分发。
+所以：
+
+- `assets/fonts/*.ttf` 已被 `.gitignore` 排除，仓库里只有获取说明
+- 自己构建需要先准备字体，见 [`assets/fonts/README.md`](assets/fonts/README.md)
+- **不要把字体提交到公开仓库，也不要把带字体的 APK 公开分发**
+- 想公开分发构建产物，需要换成开源字体（思源宋体 / EB Garamond / JetBrains Mono，
+  替换只涉及两处文件）
+
+完整说明见 [THIRD-PARTY.md](THIRD-PARTY.md)，其中包括依赖项许可、
+以及 vendored 补丁的合规性说明。
