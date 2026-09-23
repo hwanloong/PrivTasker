@@ -1,6 +1,51 @@
 # 第三方组件与许可
 
-本文件说明本项目**没有**自带哪些东西，以及依赖了什么。发布或分发前请务必读完第一节。
+本文件说明本项目**自带**和**没有自带**哪些第三方东西，以及它们的许可。分发前务必读完。
+
+**先说结论**：
+
+- ✅ **代码许可是 MIT**，新引入的依赖全是宽松许可，随 APK 分发没问题
+- ⚠️ **但字体不行** —— 三款商业字体不随仓库分发，详见下面第一节
+- ⚠️ **内嵌的 Python 包会随 APK 分发**，加新包前必须核对许可（见第二节）
+
+---
+
+## 内嵌 Python（Chaquopy）及其捆绑的包
+
+APK 里嵌入了一套 CPython 3.13 运行时（由 Chaquopy 提供），以及若干第三方 Python 包。
+**这些都会随 APK 一起分发**，所以许可必须逐个核对。
+
+### 运行时
+
+| 组件 | 许可 | 说明 |
+|---|---|---|
+| [Chaquopy](https://chaquo.com/chaquopy/) | **MIT** | 12.0.1 起完全开源，无任何许可限制 |
+| CPython | PSF License | Python 官方许可，允许分发 |
+
+### 捆绑的 Python 包
+
+以下包在**构建时**由 `android/app/build.gradle.kts` 的 `pip {}` 块装入 APK：
+
+| 包 | 许可 | 用途 |
+|---|---|---|
+| `python-docx` | MIT | Word 读写 |
+| `python-pptx` | MIT | PPT 读写 |
+| `openpyxl` | MIT | Excel 读写 |
+| `et-xmlfile` | MIT | openpyxl 依赖 |
+| `XlsxWriter` | BSD-2-Clause | python-pptx 依赖 |
+| `lxml` | BSD-3-Clause | C 扩展，含 Chaquopy 编译的 libxml2 / libxslt |
+| `pillow` | MIT-CMU | 图像处理 |
+| `requests` | Apache-2.0 | HTTP |
+| `beautifulsoup4` | MIT | 网页解析 |
+| `soupsieve` | MIT | bs4 依赖 |
+| `urllib3` / `idna` / `certifi` / `charset-normalizer` | MIT / BSD / MPL-2.0 / MIT | requests 依赖 |
+
+**全部是宽松许可**，随 APK 分发没有问题。
+（`certifi` 是 MPL-2.0，但它不是 copyleft 传染性的，只要求对其自身修改开源。）
+
+> **要新增 Python 包时**：先确认它的许可允许再分发。
+> **GPL / AGPL 的包不能随便打进来** —— 那会让整个应用受 copyleft 约束，
+> 而本项目的许可声明是 MIT。
 
 ---
 
