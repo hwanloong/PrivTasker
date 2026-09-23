@@ -560,8 +560,7 @@ flutter test test/markdown_preview_test.dart --update-goldens  # Markdown + 公�
 | **自建搜索服务** | ❌ 没测过（需要部署） |
 
 **没有真机验证的部分是最大的不确定性。** 代码能编译、能通过分析、界面能渲染，
-但 Android 运行时行为（尤其是 Shizuku 授权和 WebView）只能在实际设备上确认。
-
+但 Android 运行时行为根据不同设备会有所差异
 ---
 
 ## 已知限制
