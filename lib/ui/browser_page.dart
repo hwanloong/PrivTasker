@@ -94,7 +94,7 @@ class _BrowserPageState extends State<BrowserPage> {
 
     return Scaffold(
       backgroundColor:
-          s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+          s.isDark ? AppColors.darkBg : AppColors.lightBg,
       body: Column(
         children: <Widget>[
           GlassBar(
@@ -114,7 +114,7 @@ class _BrowserPageState extends State<BrowserPage> {
                   child: Container(
                     decoration: BoxDecoration(
                       color: s.surface,
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
                       border: Border.all(color: s.border, width: 0.9),
                     ),
                     padding:

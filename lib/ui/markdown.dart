@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 
 import '../theme/app_theme.dart';
+import 'cards.dart';
 
 /// 轻量 Markdown 渲染器。
 ///
@@ -18,16 +19,51 @@ class MarkdownView extends StatelessWidget {
     required this.text,
     this.baseSize = 15,
     this.onOpenLink,
+    this.enableCards = true,
   });
 
   final String text;
   final double baseSize;
   final void Function(String url)? onOpenLink;
 
+  /// 是否把 `card:` 代码块渲染成富卡片。
+  ///
+  /// **流式输出期间必须传 false。** 原因：
+  /// `InAppWebView` 的 `initialData` **只在创建时读一次**，
+  /// 之后即使传入新 HTML 也不会重新加载。
+  /// 所以流式过程中创建的 WebView 拿到的是**半截 HTML**，
+  /// 而流式结束后它又不会重载 —— 表现为"卡片不显示，重启应用才出现"。
+  ///
+  /// 关掉之后，未完成的卡片先以代码块形式显示，等流式结束
+  /// 再切换成卡片 —— 那时 WebView 才第一次创建，拿到的是完整内容。
+  final bool enableCards;
+
+  /// 解析结果缓存 —— **这是流式输出卡顿的主因**。
+  ///
+  /// 每个 token 触发一次 setState，整棵消息列表重建，
+  /// 于是**每条历史消息都要重新解析一遍 markdown**。
+  /// 50 条消息 × 每个 token = O(n²)，越聊越卡。
+  ///
+  /// 缓存"文本没变就不重解析"之后，只有正在流式的那一条会真正解析，
+  /// 历史消息直接命中缓存。
+  ///
+  /// 用单个槽位而不是 Map：实际访问模式是"同一条消息反复重建"，
+  /// 一个槽位就够，而且不会让缓存无限增长（长会话下 Map 会吃掉大量内存）。
+  static String? _cacheKey;
+  static List<_Block>? _cacheBlocks;
+
+  static List<_Block> _blocksFor(String text) {
+    if (_cacheKey == text && _cacheBlocks != null) return _cacheBlocks!;
+    final List<_Block> b = _parseBlocks(text);
+    _cacheKey = text;
+    _cacheBlocks = b;
+    return b;
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppSurface s = AppSurface.of(context);
-    final List<_Block> blocks = _parseBlocks(text);
+    final List<_Block> blocks = _blocksFor(text);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,6 +83,17 @@ class MarkdownView extends StatelessWidget {
 
     switch (block) {
       case final _CodeBlock b:
+        // 语言标签以 `card:` 开头就当富卡片渲染（图片 / mermaid / 内嵌 HTML）。
+        // 返回 null 表示类型不认识 —— **降级成普通代码块**，
+        // 这样以后加新卡片类型时，旧版应用也不会把它显示成空白。
+        final Widget? card = enableCards
+            ? MarkdownCards.build(
+                lang: b.lang,
+                content: b.code,
+                baseSize: baseSize,
+              )
+            : null;
+        if (card != null) return card;
         return _CodeBlockView(block: b, surface: s);
 
       case final _MathBlock m:
@@ -353,7 +400,7 @@ class _CodeBlockView extends StatelessWidget {
             width: double.infinity,
             decoration: BoxDecoration(
               color: surface.codeBg,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.code),
               border: Border.all(color: surface.border, width: 0.7),
             ),
             child: Stack(
@@ -477,7 +524,7 @@ class _TableView extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.code),
           border: Border.all(color: surface.border, width: 0.8),
         ),
         clipBehavior: Clip.antiAlias,

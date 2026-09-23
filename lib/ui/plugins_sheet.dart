@@ -58,7 +58,7 @@ class _PluginsSheetState extends State<_PluginsSheet> {
         maxHeight: MediaQuery.of(context).size.height * 0.85,
       ),
       decoration: BoxDecoration(
-        color: s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(top: BorderSide(color: s.border, width: 0.8)),
       ),
@@ -220,7 +220,7 @@ class _PluginsSheetState extends State<_PluginsSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               decoration: BoxDecoration(
                 color: s.codeBg,
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(AppRadius.code),
               ),
               child: Text(
                 p.template,
@@ -399,7 +399,7 @@ class _PluginEditorState extends State<_PluginEditor> {
 
     return Scaffold(
       backgroundColor:
-          s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+          s.isDark ? AppColors.darkBg : AppColors.lightBg,
       appBar: AppBar(
         leading: IconButton(
           icon: Icon(Icons.close_rounded, color: s.text),
@@ -439,7 +439,7 @@ class _PluginEditorState extends State<_PluginEditor> {
               padding: const EdgeInsets.all(11),
               decoration: BoxDecoration(
                 color: AppColors.danger.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(11),
+                borderRadius: BorderRadius.circular(AppRadius.code),
                 border: Border.all(
                   color: AppColors.danger.withValues(alpha: 0.3),
                   width: 0.8,
@@ -620,7 +620,7 @@ class _PluginEditorState extends State<_PluginEditor> {
           color: active
               ? AppColors.accent.withValues(alpha: 0.14)
               : s.surface,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
           border: Border.all(
             color: active ? AppColors.accent : s.border,
             width: active ? 1.2 : 0.9,
@@ -652,7 +652,7 @@ class _PluginEditorState extends State<_PluginEditor> {
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           color: active ? c.withValues(alpha: 0.14) : s.surface,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
           border: Border.all(
             color: active ? c : s.border,
             width: active ? 1.2 : 0.9,
@@ -691,7 +691,7 @@ class _PluginEditorState extends State<_PluginEditor> {
     return Container(
       decoration: BoxDecoration(
         color: s.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.code),
         border: Border.all(color: s.border, width: 0.9),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -727,7 +727,7 @@ class _PluginEditorState extends State<_PluginEditor> {
     return Container(
       decoration: BoxDecoration(
         color: s.codeBg,
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(AppRadius.code),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: TextFormField(

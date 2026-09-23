@@ -64,7 +64,7 @@ class _HomeShellState extends State<HomeShell> {
 
     return Scaffold(
       backgroundColor:
-          s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+          s.isDark ? AppColors.darkBg : AppColors.lightBg,
       body: IndexedStack(
         index: _index,
         children: <Widget>[
@@ -141,62 +141,90 @@ class _HomeShellState extends State<HomeShell> {
     bool alert = false,
   }) {
     final bool active = _index == index;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return Expanded(
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.field),
         onTap: () => setState(() => _index = index),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Stack(
-                clipBehavior: Clip.none,
-                children: <Widget>[
-                  Icon(
-                    active ? activeIcon : icon,
-                    size: 21,
-                    color: active ? AppColors.accent : s.muted,
-                  ),
-                  if (badge != null)
-                    Positioned(
-                      right: -9,
-                      top: -5,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 4.5, vertical: 1),
-                        constraints: const BoxConstraints(minWidth: 15),
-                        decoration: BoxDecoration(
-                          // 有逾期任务时角标变红，这是唯一需要立刻注意的状态
-                          color: alert ? AppColors.danger : AppColors.accent,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          badge > 99 ? '99+' : '$badge',
-                          textAlign: TextAlign.center,
-                          style: AppFonts.body(
-                            size: 9.5,
-                            weight: FontWeight.w700,
-                            color: Colors.white,
-                            height: 1.2,
+              // M3 NavigationBar 的「胶囊型选中指示器」——
+              // 这是 Material You 最好认的一个特征：选中项背后有一块
+              // secondaryContainer 色的药丸，图标和文字都换成对应前景色。
+              AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    // 宽度**必须固定**。之前是 `active ? 60 : 0`，
+                    // 未选中时容器宽度为 0，里面的图标被压成 0 宽 ——
+                    // 三个项的图标位置就全错开了。
+                    // M3 的指示器本来就是定宽的，只让**颜色**做动画。
+                    width: 60,
+                    height: 30,
+                    decoration: ShapeDecoration(
+                      color: active
+                          ? scheme.secondaryContainer
+                          : Colors.transparent,
+                      shape: const StadiumBorder(),
+                    ),
+                    child: Center(
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: <Widget>[
+                          Icon(
+                            active ? activeIcon : icon,
+                            size: 22,
+                            color: active
+                                ? scheme.onSecondaryContainer
+                                : scheme.onSurfaceVariant,
                           ),
-                        ),
+                          if (badge != null)
+                            Positioned(
+                              right: -11,
+                              top: -6,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 4.5, vertical: 1),
+                                constraints: const BoxConstraints(minWidth: 15),
+                                decoration: BoxDecoration(
+                                  // 有逾期任务时角标变红，这是唯一需要立刻注意的状态
+                                  color: alert ? scheme.error : scheme.primary,
+                                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                                ),
+                                child: Text(
+                                  badge > 99 ? '99+' : '$badge',
+                                  textAlign: TextAlign.center,
+                                  style: AppFonts.body(
+                                    size: 9.5,
+                                    weight: FontWeight.w700,
+                                    color: alert
+                                        ? scheme.onError
+                                        : scheme.onPrimary,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    label,
+                    style: AppFonts.body(
+                      size: 11,
+                      weight: active ? FontWeight.w700 : FontWeight.w500,
+                      color: active
+                          ? scheme.onSurface
+                          : scheme.onSurfaceVariant,
+                      height: 1.2,
+                    ),
+                  ),
                 ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                style: AppFonts.body(
-                  size: 11,
-                  weight: active ? FontWeight.w700 : FontWeight.w500,
-                  color: active ? AppColors.accent : s.muted,
-                  height: 1.2,
-                ),
-              ),
-            ],
           ),
         ),
       ),

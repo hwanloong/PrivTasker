@@ -10,7 +10,10 @@ import '../core/models.dart';
 import '../core/net_error.dart';
 import '../core/scrub.dart';
 import '../core/selfhosted_search.dart';
+import '../core/web_fetch.dart';
+import 'browser_tool.dart';
 import 'tool.dart';
+import 'webview_loader.dart';
 
 /// 联网：搜索 + 抓取网页。
 ///
@@ -129,78 +132,43 @@ class WebTool extends AgentTool {
 
     final List<String> tried = <String>[];
 
-    // ---------- 0) 自建搜索服务（配了地址、且模式允许时才走）----------
+    // ---------- 1) Tavily（有 Key 用 Key，没 Key 走免 key 模式）----------
     //
-    // 放最前是因为它质量最高：它自己完成了抓取 → 正文提取 → 去噪 → 分块 →
-    // 向量化 → 相关度排序，拿回来就是能直接读的资料；而且它自带提示注入清洗。
-    // 代价是必须自己部署（Docker + SearXNG），所以是可选的。
-    //
-    // 注意要受 mode 约束：选了「只用浏览器」或「只用服务端」时就不该走这里，
-    // 否则用户明明指定了通道却被换掉。
-    final bool selfHostedAllowed =
-        (mode == 'auto' || mode == 'selfhosted') &&
-            ctx.selfHostedSearchUrl.trim().isNotEmpty;
-
-    if (selfHostedAllowed) {
-      final SelfHostedOutcome sh = await SelfHostedSearch.search(
-        baseUrl: ctx.selfHostedSearchUrl,
-        query: query,
-        topK: limit > 3 ? 3 : limit,
-      );
-      if (sh.ok && sh.text.trim().isNotEmpty) {
-        return clampOutput(sh.text, max: 10000);
-      }
-      tried.add('自建搜索服务：${sh.error ?? '没有返回结果'}');
-
-      // 指定只用自建服务时不降级，把话说清楚
-      if (mode == 'selfhosted') {
-        return '自建搜索服务没有返回结果。\n\n${tried.join('\n')}\n\n'
-            '常见原因：服务没启动、地址填错、或者手机连不到那台机器'
-            '（比如服务跑在电脑上而手机不在同一个局域网）。\n'
-            '可以在设置里点「测试连接」先确认能通。';
-      }
-    }
-
-    // ---------- 1) DeepSeek 服务端搜索 ----------
-    if (mode != 'browser') {
-      if (ctx.mainApiKey.trim().isEmpty) {
-        tried.add('DeepSeek 服务端搜索：未配置 API Key');
-      } else {
-        final ServerSearchOutcome outcome = await DeepSeekServerSearch.search(
-          baseUrl: ctx.mainBaseUrl,
-          apiKey: ctx.mainApiKey,
-          model: ctx.mainModel,
-          query: query,
-        );
-
-        if (outcome.searched && outcome.text.trim().isNotEmpty) {
-          return '（来源：DeepSeek 服务端联网搜索）\n\n'
-              '${clampOutput(outcome.text, max: 9000)}';
-        }
-
-        tried.add('DeepSeek 服务端搜索：${outcome.error ?? '没有返回内容'}');
-
-        // 指定只用服务端时不降级，把话说清楚
-        if (mode == 'deepseek') {
-          return '服务端搜索没有生效。\n\n${tried.join('\n')}\n\n'
-              '依据：官方 Responses API 文档的 Tools 表把 `web_search` 标为「忽略」，'
-              '所以这条通道可能本来就不被支持。\n'
-              '可以在「设置 → 联网」把方式改成「只用内置浏览器抓取」，'
-              '或者填一个 Tavily Key。';
-        }
-      }
-    }
-
-    // ---------- 2) Tavily ----------
-    if (ctx.searchApiKey.trim().isNotEmpty) {
+    // **无条件调用**：以前这里判断"填了 Key 才走"，导致没配 Key 的用户
+    // 直接跳到注定失败的 DuckDuckGo。而 Tavily 的免 key 模式不需要任何配置，
+    // 实测国内直连可达 —— 它应该是默认的第一选择，不是可选项。
+    {
       final String r = await _tavily(ctx, query, limit);
       if (!r.startsWith('搜索失败') && !r.startsWith('搜索出错')) return r;
       tried.add('Tavily：${r.split('\n').first}');
     }
 
-    // ---------- 3) 内置浏览器抓取 ----------
+    // ---------- 2) 内置浏览器（百度优先）----------
     //
-    // 搜索摘要同样来自不可信的网页，所以要过一遍注入清洗再交给模型。
+    // 这条**必须放在 DuckDuckGo 之前**。
+    //
+    // 原来这里直接调 DDG 的 HTTP 兜底，但 DDG 在国内连 DNS 都解析不了，
+    // 每次都是白等一趟超时；而内置浏览器走百度是能**立刻出结果**的那条。
+    // 更糟的是 `web` 和 `browser` 各有一条独立的兜底链，
+    // 模型先调 `web` 就会撞上 DDG 这条死路，再调 `browser` 才拿到结果 ——
+    // 用户看到的就是"能出结果，但先白跑了一趟"。
+    //
+    // 复用同一个 BrowserTool 就消除了这个分裂：两条路最终落到同一套引擎。
+    final String viaBrowser = await const BrowserTool().run(
+      ctx,
+      <String, dynamic>{
+        'action': 'search',
+        'query': query,
+        'limit': limit,
+      },
+    );
+
+    if (!viaBrowser.startsWith('搜索失败') && !viaBrowser.startsWith('搜索出错')) {
+      return viaBrowser;
+    }
+    tried.add('内置浏览器：${viaBrowser.split('\n').first}');
+
+    // ---------- 3) DuckDuckGo 兜底（国内基本不可用，留着以防换网络）----------
     final String browser = await _ddg(query, limit);
     final ScrubResult cleaned = PromptScrubber.scrub(browser);
     final String safeBrowser =
@@ -211,19 +179,169 @@ class WebTool extends AgentTool {
     // 前面几层都失败时，把「尝试过什么」一并带上，否则用户只看到最后一层的报错，
     // 会以为根本没试过其它通道。
     return '以下通道都没成功：\n${tried.join('\n')}\n\n'
-        '最后一次尝试（内置浏览器抓取）：\n$safeBrowser';
+        '最后一次尝试（DuckDuckGo 兜底）：\n$safeBrowser';
+  }
+
+  /// Bing 直连搜索。
+  ///
+  /// 用普通 HTTP 拿结果页 HTML，再用正则切 `b_algo` 结果块。
+  /// **刻意不用 WebView**：Bing 不拦服务端抓取，直连几百毫秒就能拿到，
+  /// 而 WebView 要启动 Chromium（一两秒起），没必要。
+  Future<String> _bingHttp(String query, int limit) async {
+    try {
+      final Uri uri = Uri.parse(
+        'https://www.bing.com/search?q=${Uri.encodeComponent(query)}'
+        '&setlang=zh-CN&ensearch=0',
+      );
+
+      final http.Response resp = await http.get(
+        uri,
+        headers: <String, String>{
+          // 移动端 UA：Bing 对移动端返回的页面结构更简单，也更好解析
+          'User-Agent': WebViewLoader.mobileUserAgent,
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (resp.statusCode != 200) return '';
+
+      final String html = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      if (html.length < 2000) return '';
+
+      // Bing 的结果块是 <li class="b_algo">。直接按这个前缀切开，
+      // 比写嵌套正则稳 —— 正则处理不了任意层级的 HTML 嵌套。
+      final List<String> parts = html.split(RegExp(r'<li class="b_algo"'));
+      if (parts.length <= 1) return '';
+
+      final List<(String title, String url, String snippet)> items =
+          <(String, String, String)>[];
+
+      for (int i = 1; i < parts.length; i++) {
+        final String chunk = parts[i];
+
+        final RegExpMatch? a = RegExp(
+          r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>',
+        ).firstMatch(chunk);
+        if (a == null) continue;
+
+        final String url = a.group(1)!;
+        if (!url.startsWith('http')) continue;
+
+        final String title = _clean(a.group(2) ?? '');
+        if (title.isEmpty) continue;
+
+        final RegExpMatch? p =
+            RegExp(r'<p[^>]*>([\s\S]*?)</p>').firstMatch(chunk);
+        final String snippet = p == null ? '' : _clean(p.group(1) ?? '');
+
+        items.add((title, url, snippet));
+      }
+
+      if (items.isEmpty) return '';
+
+      final int shown = items.length < limit ? items.length : limit;
+      final StringBuffer sb = StringBuffer();
+
+      for (int i = 0; i < shown; i++) {
+        final (String title, String url, String snippet) = items[i];
+        sb.writeln('[${i + 1}] $title');
+        sb.writeln('    $url');
+        if (snippet.isNotEmpty) {
+          sb.writeln(
+              '    ${snippet.length > 400 ? '${snippet.substring(0, 400)}…' : snippet}');
+        }
+        sb.writeln();
+      }
+
+      // 摘要太薄 —— 模型拿着几条导语拼不出准确答案。
+      // 所以顺手把前两条的**实际正文**抓回来并附上。
+      // 这一步是「搜索 → 抓取」里的抓取，也是让结果真正有用的关键。
+      final String body = await _fetchTopBodies(items, 2);
+      if (body.isNotEmpty) {
+        sb.writeln('===== 以下是从前几条结果抓回的实际正文 =====');
+        sb.writeln('（回答时优先依据这部分，它比摘要可靠）\n');
+        sb.write(body);
+      }
+
+      return sb.toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 抓取前 [count] 条结果的正文。
+  ///
+  /// 并发抓，并给每条独立的短超时 —— 一条卡住不该拖累整体。
+  /// 抓不到就跳过（付费墙、反爬、超时都很常见），不报错。
+  Future<String> _fetchTopBodies(
+    List<(String title, String url, String snippet)> items,
+    int count,
+  ) async {
+    final List<Future<String>> jobs = <Future<String>>[];
+    for (int i = 0; i < items.length && i < count; i++) {
+      jobs.add(_fetchBody(items[i].$1, items[i].$2));
+    }
+    if (jobs.isEmpty) return '';
+
+    final List<String> bodies = await Future.wait(jobs);
+    final String joined =
+        bodies.where((String s) => s.isNotEmpty).join('\n\n---\n\n');
+    return joined;
+  }
+
+  Future<String> _fetchBody(String title, String url) async {
+    try {
+      final http.Response resp = await http.get(
+        Uri.parse(url),
+        headers: <String, String>{
+          'User-Agent': WebViewLoader.mobileUserAgent,
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        },
+      ).timeout(const Duration(seconds: 12));
+
+      if (resp.statusCode != 200) return '';
+
+      final String ct = (resp.headers['content-type'] ?? '').toLowerCase();
+      if (!ct.contains('html') && !ct.contains('text')) return '';
+
+      final String text = WebFetcher.stripHtml(
+        utf8.decode(resp.bodyBytes, allowMalformed: true),
+      );
+      // 太短的多半是 JS 空壳或验证页，不如不返回
+      if (text.length < 300) return '';
+
+      final String clipped =
+          text.length > 3500 ? '${text.substring(0, 3500)}…' : text;
+      return '【$title】\n$url\n$clipped';
+    } catch (_) {
+      return '';
+    }
   }
 
   // ------------------------------------------------------------ Tavily
 
   Future<String> _tavily(ToolContext ctx, String query, int limit) async {
+    // 有 Key 用 Key，没 Key 用 **keyless 模式**。
+    //
+    // Tavily 提供免 key 访问：加一个 `X-Tavily-Access-Mode: keyless` 头即可，
+    // 不需要账号、不需要配置，返回结构和带 Key 完全一致。
+    // 实测国内**直连可达**（HTTP 200），不需要代理 —— 这一点很关键：
+    // 它是唯一一条不依赖手机网络能翻墙的搜索通道。
+    //
+    // 额度用完后接口会返回一段自然语言说明，这里原样带出去，用户能看懂。
+    final bool keyless = ctx.searchApiKey.trim().isEmpty;
+
     try {
       final http.Response resp = await http
           .post(
             Uri.parse('https://api.tavily.com/search'),
-            headers: <String, String>{'Content-Type': 'application/json'},
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              if (keyless) 'X-Tavily-Access-Mode': 'keyless',
+            },
             body: jsonEncode(<String, dynamic>{
-              'api_key': ctx.searchApiKey,
+              if (!keyless) 'api_key': ctx.searchApiKey,
               'query': query,
               'max_results': limit,
               'include_answer': true,
@@ -232,7 +350,13 @@ class WebTool extends AgentTool {
           .timeout(const Duration(seconds: 25));
 
       if (resp.statusCode != 200) {
-        return '搜索失败：HTTP ${resp.statusCode}\n${clampOutput(resp.body, max: 500)}';
+        final String detail = clampOutput(resp.body, max: 400);
+        if (resp.statusCode == 429 || detail.toLowerCase().contains('rate')) {
+          return '搜索失败：免费额度已用完。\n$detail\n\n'
+              '（免 Key 模式是限流的。去 app.tavily.com 注册可拿 1000 次/月，'
+              '把 Key 填进「设置 → 联网」即可，代码不用改。）';
+        }
+        return '搜索失败：HTTP ${resp.statusCode}\n$detail';
       }
 
       final Map<String, dynamic> j =

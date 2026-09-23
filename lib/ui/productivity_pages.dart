@@ -4,6 +4,7 @@ import '../core/productivity.dart';
 import '../theme/app_theme.dart';
 import '../theme/glass.dart';
 import 'home_shell.dart';
+import 'note_editor_page.dart';
 
 String _two(int v) => v.toString().padLeft(2, '0');
 
@@ -25,6 +26,12 @@ class _NotesPageState extends State<NotesPage> {
   final TextEditingController _search = TextEditingController();
   bool _searching = false;
 
+  /// 当前选中的标签筛选。null = 不筛选。
+  ///
+  /// 和搜索是**叠加**关系而不是二选一：选了标签之后再搜关键词，
+  /// 是在这个标签范围内搜。这样"找工作时笔记里提到 X 的那条"才成立。
+  String? _activeTag;
+
   @override
   void initState() {
     super.initState();
@@ -39,24 +46,58 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   void _onChange() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // 标签可能因为编辑/删除而不复存在，筛选项要跟着失效，
+    // 否则会停在"筛一个已经不存在的标签"然后显示空列表
+    if (_activeTag != null && !_allTags().contains(_activeTag)) {
+      _activeTag = null;
+    }
+    setState(() {});
+  }
+
+  /// 所有出现过的标签，按出现次数从多到少
+  List<String> _allTags() {
+    final Map<String, int> count = <String, int>{};
+    for (final Note n in widget.store.items) {
+      for (final String t in n.tags) {
+        final String k = t.trim();
+        if (k.isEmpty) continue;
+        count[k] = (count[k] ?? 0) + 1;
+      }
+    }
+    final List<String> tags = count.keys.toList()
+      ..sort((String a, String b) {
+        final int c = count[b]!.compareTo(count[a]!);
+        return c != 0 ? c : a.compareTo(b);
+      });
+    return tags;
   }
 
   @override
   Widget build(BuildContext context) {
     final AppSurface s = AppSurface.of(context);
-    final List<Note> list = widget.store.search(_search.text);
+    final List<String> tags = _allTags();
+
+    List<Note> list = widget.store.search(_search.text);
+    if (_activeTag != null) {
+      list = list
+          .where((Note n) => n.tags.any((String t) => t.trim() == _activeTag))
+          .toList();
+    }
+    final int total = widget.store.items.length;
 
     return Scaffold(
       backgroundColor:
-          s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+          s.isDark ? AppColors.darkBg : AppColors.lightBg,
       body: Column(
         children: <Widget>[
           AppHeader(
             title: '笔记',
-            subtitle: widget.store.items.isEmpty
+            subtitle: total == 0
                 ? '还没有笔记'
-                : '共 ${widget.store.items.length} 条',
+                : (_activeTag == null
+                    ? '共 $total 条'
+                    : '筛选「$_activeTag」· ${list.length}/$total 条'),
             actions: <Widget>[
               GlassIconButton(
                 icon: _searching ? Icons.close_rounded : Icons.search_rounded,
@@ -77,34 +118,77 @@ class _NotesPageState extends State<NotesPage> {
                 onTap: () => _edit(null),
               ),
             ],
-            bottom: _searching
-                ? Container(
-                    decoration: BoxDecoration(
-                      color: s.surface,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: s.border, width: 0.9),
-                    ),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-                    child: TextField(
-                      controller: _search,
-                      autofocus: true,
-                      onChanged: (_) => setState(() {}),
-                      style: AppFonts.body(size: 14.5, color: s.text),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 11),
-                        hintText: '搜索标题、正文或标签',
-                        hintStyle: AppFonts.body(size: 14, color: s.muted),
-                      ),
-                    ),
-                  )
-                : null,
+            bottom: (tags.isEmpty && !_searching)
+                ? null
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      if (_searching)
+                        Container(
+                          decoration: BoxDecoration(
+                            color: s.surface,
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.pill),
+                            border: Border.all(color: s.border, width: 0.9),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 2),
+                          child: TextField(
+                            controller: _search,
+                            autofocus: true,
+                            onChanged: (_) => setState(() {}),
+                            style: AppFonts.body(size: 14.5, color: s.text),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              filled: false,
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              contentPadding:
+                                  const EdgeInsets.symmetric(vertical: 11),
+                              hintText: '搜索标题、正文或标签',
+                              hintStyle:
+                                  AppFonts.body(size: 14, color: s.muted),
+                            ),
+                          ),
+                        ),
+                      // ---- 标签筛选 ----
+                      //
+                      // 横向滚动而不是换行：标签一多换行会把头部撑得很高，
+                      // 正文可视区域被压缩。横向滚动的高度永远只有一行。
+                      if (tags.isNotEmpty) ...<Widget>[
+                        if (_searching) const SizedBox(height: 9),
+                        SizedBox(
+                          height: 32,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            padding: EdgeInsets.zero,
+                            children: <Widget>[
+                              // 「全部」只在有筛选时才出现 ——
+                              // 没筛选时它没有任何作用，白占一个位置
+                              if (_activeTag != null) ...<Widget>[
+                                _tagChip(s, '全部', null, count: total),
+                                const SizedBox(width: 7),
+                              ],
+                              for (final String t in tags) ...<Widget>[
+                                _tagChip(
+                                  s,
+                                  t,
+                                  t,
+                                  count: widget.store.items
+                                      .where((Note n) => n.tags
+                                          .any((String x) => x.trim() == t))
+                                      .length,
+                                ),
+                                const SizedBox(width: 7),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
           ),
           Expanded(
             child: list.isEmpty
@@ -122,6 +206,51 @@ class _NotesPageState extends State<NotesPage> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 一个标签筛选按钮。
+  ///
+  /// [value] 为 null 表示「全部」。显示条数是因为筛选后最想知道的是
+  /// "这个标签下有多少东西"，不给数字的话点进去可能是个空列表。
+  Widget _tagChip(AppSurface s, String label, String? value,
+      {required int count}) {
+    final bool active = _activeTag == value;
+    final Color fg = active ? AppColors.accent : s.muted;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _activeTag = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: ShapeDecoration(
+          color: active
+              ? AppColors.accent.withValues(alpha: 0.12)
+              : s.surface,
+          shape: const StadiumBorder(),
+          // 选中的加一圈描边 —— 只靠底色在小屏上不够明显
+          shadows: null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              label,
+              style: AppFonts.body(
+                size: 12.5,
+                weight: active ? FontWeight.w700 : FontWeight.w500,
+                color: fg,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              '$count',
+              style: AppFonts.code(size: 10.5, color: fg),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -172,111 +301,21 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
+  /// 打开笔记编辑页。
+  ///
+  /// 改成**独立页面**而不是底部弹窗：写笔记是沉浸行为，
+  /// 弹窗高度被键盘和屏幕挤压，写长内容很难受，误触遮罩还会丢内容。
+  /// 编辑页自己在返回时保存。
   Future<void> _edit(Note? existing) async {
-    final TextEditingController title =
-        TextEditingController(text: existing?.title ?? '');
-    final TextEditingController body =
-        TextEditingController(text: existing?.body ?? '');
-    final TextEditingController tags =
-        TextEditingController(text: existing?.tags.join(' ') ?? '');
-    final AppSurface s = AppSurface.of(context);
-
-    final bool? saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext ctx) => Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-        child: Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(ctx).size.height * 0.85,
-          ),
-          decoration: BoxDecoration(
-            color:
-                s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border(top: BorderSide(color: s.border, width: 0.8)),
-          ),
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      existing == null ? '新建笔记' : '编辑笔记',
-                      style: AppFonts.body(
-                        size: 17,
-                        weight: FontWeight.w700,
-                        color: s.text,
-                        height: 1.2,
-                      ),
-                    ),
-                  ),
-                  if (existing != null)
-                    GlassIconButton(
-                      icon: Icons.delete_outline_rounded,
-                      tooltip: '删除',
-                      size: 34,
-                      iconSize: 17,
-                      color: AppColors.danger,
-                      onTap: () {
-                        widget.store.remove(existing.id);
-                        Navigator.of(ctx).pop(false);
-                      },
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: ListView(
-                  children: <Widget>[
-                    _sheetInput(s, title, '标题', size: 16),
-                    const SizedBox(height: 9),
-                    _sheetInput(s, body, '正文', maxLines: 10),
-                    const SizedBox(height: 9),
-                    _sheetInput(s, tags, '标签（空格分隔）', mono: true),
-                    const SizedBox(height: 16),
-                    GlassButton(
-                      label: '保存',
-                      accent: true,
-                      expand: true,
-                      onTap: () => Navigator.of(ctx).pop(true),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext _) => NoteEditorPage(
+          store: widget.store,
+          note: existing,
         ),
       ),
     );
-
-    if (saved == true) {
-      final List<String> tagList = tags.text
-          .split(RegExp(r'\s+'))
-          .where((String t) => t.trim().isNotEmpty)
-          .toList();
-      if (existing == null) {
-        widget.store.create(
-          title: title.text,
-          body: body.text,
-          tags: tagList,
-        );
-      } else {
-        existing.title =
-            title.text.trim().isEmpty ? existing.title : title.text.trim();
-        existing.body = body.text;
-        existing.tags = tagList;
-        widget.store.touch(existing);
-      }
-    }
-
-    title.dispose();
-    body.dispose();
-    tags.dispose();
+    if (mounted) setState(() {});
   }
 }
 
@@ -296,7 +335,7 @@ Widget _sheetInput(
   return Container(
     decoration: BoxDecoration(
       color: s.surface,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.code),
       border: Border.all(color: s.border, width: 0.9),
     ),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -362,7 +401,7 @@ class _TasksPageState extends State<TasksPage> {
 
     return Scaffold(
       backgroundColor:
-          s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+          s.isDark ? AppColors.darkBg : AppColors.lightBg,
       body: Column(
         children: <Widget>[
           AppHeader(
@@ -576,9 +615,7 @@ class _TasksPageState extends State<TasksPage> {
                 maxHeight: MediaQuery.of(ctx).size.height * 0.85,
               ),
               decoration: BoxDecoration(
-                color: s == AppSurface.dark
-                    ? AppColors.darkBg
-                    : AppColors.lightBg,
+                color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(24)),
                 border: Border(top: BorderSide(color: s.border, width: 0.8)),

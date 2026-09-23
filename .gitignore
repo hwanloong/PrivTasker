@@ -67,3 +67,6 @@ app.*.map.json
 # golden 测试失败时生成的对比图（masterImage / testImage / maskedDiff …）
 # 这些是排查用的临时产物，不该进仓库
 /test/failures/
+
+# Gradle 构建报告（不该进仓库）
+/android/build/

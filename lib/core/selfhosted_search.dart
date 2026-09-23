@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -34,13 +35,21 @@ class SelfHostedOutcome {
 class SelfHostedSearch {
   const SelfHostedSearch._();
 
-  /// 探活，给设置页的「测试连接」用
-  static Future<String?> health(String baseUrl) async {
+  /// 探活。
+  ///
+  /// 有两个用途：
+  ///  1. 设置页的「测试连接」
+  ///  2. **搜索前的预检** —— 这个更重要。搜索接口很慢（服务端要加载嵌入模型、
+  ///     还要抓取+提取+分块+排序），拿 40 秒去赌一个可能根本没启动的服务
+  ///     是最糟的体验。`/health` 是空操作，几秒就能判断，不通就直接跳过这一层。
+  static Future<String?> health(
+    String baseUrl, {
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
     final Uri? uri = _endpoint(baseUrl, '/health');
     if (uri == null) return '地址不合法';
     try {
-      final http.Response resp =
-          await http.get(uri).timeout(const Duration(seconds: 10));
+      final http.Response resp = await http.get(uri).timeout(timeout);
       if (resp.statusCode != 200) return 'HTTP ${resp.statusCode}';
       final dynamic j = jsonDecode(utf8.decode(resp.bodyBytes));
       if (j is Map && j['status'] != null) return null; // 正常
@@ -68,7 +77,7 @@ class SelfHostedSearch {
     int topK = 3,
     bool includeContent = true,
     String? category,
-    Duration timeout = const Duration(seconds: 45),
+    Duration timeout = const Duration(seconds: 35),
   }) async {
     final Uri? uri = _endpoint(baseUrl, '/search');
     if (uri == null) {
@@ -84,29 +93,53 @@ class SelfHostedSearch {
       payload['categories'] = <String>[category.trim()];
     }
 
-    try {
-      final http.Response resp = await NetError.retry(
-        () => http
+    // 重试策略：**只在超时时重试一次**。
+    //
+    // 这个服务第一次搜索要加载嵌入模型（sentence-transformers 是懒加载的），
+    // 冷启动可能超过单次超时 —— 表现就是「一直转圈然后失败」。
+    // 但第一次超时的那一刻，服务端其实已经把模型装进内存了（它还在继续跑），
+    // 所以紧接着再发一次通常秒回。
+    //
+    // 这里修正了我上一轮的错误判断：当时我删掉重试，理由是「重试只是把等待翻倍」。
+    // 那对「服务真的挂了」成立，但对「冷启动」恰恰相反 —— 不重试就永远失败，
+    // 而且用户会以为服务坏了。
+    //
+    // 只对超时重试，不对其它错误重试：连接被拒、HTTP 4xx 再试也是一样的结果。
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        final http.Response resp = await http
             .post(
               uri,
               headers: <String, String>{'Content-Type': 'application/json'},
               body: jsonEncode(payload),
             )
-            .timeout(timeout),
-        attempts: 2,
-      );
+            .timeout(timeout);
 
-      if (resp.statusCode != 200) {
+        if (resp.statusCode != 200) {
+          return SelfHostedOutcome(
+            ok: false,
+            error: 'HTTP ${resp.statusCode}：${_humanize(resp.bodyBytes)}',
+          );
+        }
+
+        return parseResponse(utf8.decode(resp.bodyBytes), topK: topK);
+      } on TimeoutException {
+        if (attempt == 0) {
+          // 冷启动，模型这会儿应该已经加载好了，再试一次
+          continue;
+        }
         return SelfHostedOutcome(
           ok: false,
-          error: 'HTTP ${resp.statusCode}：${_humanize(resp.bodyBytes)}',
+          error: '两次请求都超时（每次 ${timeout.inSeconds} 秒）。'
+              '服务端可能仍在加载模型，或正在处理别的请求 —— 稍等几秒再问一次，'
+              '通常就快了（模型加载进内存后会一直留着）。',
         );
+      } catch (e) {
+        return SelfHostedOutcome(ok: false, error: NetError.describe(e));
       }
-
-      return parseResponse(utf8.decode(resp.bodyBytes), topK: topK);
-    } catch (e) {
-      return SelfHostedOutcome(ok: false, error: NetError.describe(e));
     }
+
+    return const SelfHostedOutcome(ok: false, error: '未知错误');
   }
 
   /// 解析返回。抽成独立方法以便单测 —— 两种响应形态都要兼容。

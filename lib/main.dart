@@ -6,8 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'core/productivity.dart';
+import 'core/python.dart';
+import 'core/rules.dart';
 import 'core/storage.dart';
 import 'core/store.dart';
+import 'core/termux.dart';
 import 'plugins/plugin.dart';
 import 'shizuku/shizuku_service.dart';
 import 'theme/app_theme.dart';
@@ -37,6 +40,10 @@ Future<void> main() async {
   final TaskStore tasks = TaskStore(File('${docs.path}/tasks.json'));
   await tasks.load();
 
+  // 自定义规则。用单例是因为它要在系统提示词构建时读到，
+  // 而那条路径在 AgentRunner 深处，透传要改十几个文件。
+  await RuleStore.configure(File('${docs.path}/rules.json'));
+
   // 工作目录选外部私有目录而不是 /data/data：截图是我们自己写盘没问题，
   // 但 screenrecord 是 shell 身份落盘，shell 写不进 app 的私有数据目录。
   // /sdcard/Android/data/<pkg>/files 两边都能访问。
@@ -54,6 +61,14 @@ Future<void> main() async {
 
   final ShizukuService shizuku = ShizukuService();
   await shizuku.init();
+
+  // 探测 Termux 是否可用。**不 await** —— 它要查包管理器、可能耗时，
+  // 而它只影响"注册哪个工具"，不该拖慢启动。探测完会通知监听者。
+  unawaited(TermuxService.instance.refresh());
+
+  // 探测内嵌 Python。**也不 await** —— 首次调用要启动解释器，可能一两秒。
+  // 同样只影响工具注册，不该挡住启动。
+  unawaited(PythonService.instance.refresh());
 
   runApp(AgentApp(
     settings: settings,
@@ -88,31 +103,40 @@ class AgentApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'PrivTasker',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
-      // 跟随系统暗色模式
-      themeMode: ThemeMode.system,
-      // 系统栏（状态栏/导航栏）的图标颜色必须随主题走：
-      // 深色模式下用浅色图标，否则图标压在纯黑背景上根本看不见。
-      builder: (BuildContext context, Widget? child) {
-        final Brightness brightness = MediaQuery.platformBrightnessOf(context);
-        return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: AppTheme.systemUiFor(brightness),
-          child: child ?? const SizedBox.shrink(),
+    return AnimatedBuilder(
+      // 换主题色时要重建整棵树 —— 种子色是在 AppTheme._build 里写进
+      // AppColors.accent 的，不重建的话已画好的组件会留着旧颜色。
+      animation: settings,
+      builder: (BuildContext context, Widget? _) {
+        final Color seed = Color(settings.seedColor);
+        return MaterialApp(
+          title: 'PrivTasker',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light(seed),
+          darkTheme: AppTheme.dark(seed),
+          // 跟随系统暗色模式
+          themeMode: ThemeMode.system,
+          // 系统栏（状态栏/导航栏）的图标颜色必须随主题走：
+          // 深色模式下用浅色图标，否则图标压在纯黑背景上根本看不见。
+          builder: (BuildContext context, Widget? child) {
+            final Brightness brightness =
+                MediaQuery.platformBrightnessOf(context);
+            return AnnotatedRegion<SystemUiOverlayStyle>(
+              value: AppTheme.systemUiFor(brightness),
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
+          home: HomeShell(
+            settings: settings,
+            conversations: conversations,
+            plugins: plugins,
+            shizuku: shizuku,
+            workDir: workDir,
+            notes: notes,
+            tasks: tasks,
+          ),
         );
       },
-      home: HomeShell(
-        settings: settings,
-        conversations: conversations,
-        plugins: plugins,
-        shizuku: shizuku,
-        workDir: workDir,
-        notes: notes,
-        tasks: tasks,
-      ),
     );
   }
 }

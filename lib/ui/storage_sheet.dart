@@ -96,7 +96,7 @@ class _StorageSheetState extends State<_StorageSheet> {
         maxHeight: MediaQuery.of(context).size.height * 0.82,
       ),
       decoration: BoxDecoration(
-        color: s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(top: BorderSide(color: s.border, width: 0.8)),
       ),
@@ -130,8 +130,8 @@ class _StorageSheetState extends State<_StorageSheet> {
           ),
           Flexible(
             child: r == null
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 50),
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 50),
                     child: Center(
                       child: SizedBox(
                         width: 18,
@@ -151,7 +151,7 @@ class _StorageSheetState extends State<_StorageSheet> {
                         margin: const EdgeInsets.only(bottom: 14),
                         child: Row(
                           children: <Widget>[
-                            const Icon(Icons.folder_outlined,
+                            Icon(Icons.folder_outlined,
                                 size: 19, color: AppColors.accent),
                             const SizedBox(width: 11),
                             Expanded(

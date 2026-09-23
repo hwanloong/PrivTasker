@@ -1,12 +1,14 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/models.dart';
 import '../theme/app_theme.dart';
 import '../theme/glass.dart';
 import 'browser_page.dart';
 import 'markdown.dart';
+import 'tool_line.dart';
 
 /// 渲染一条消息。
 ///
@@ -44,7 +46,7 @@ class MessageView extends StatelessWidget {
               const SizedBox(height: 2),
             if (message.content.trim().isNotEmpty)
               Container(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AppColors.accent,
                   borderRadius: BorderRadius.only(
                     topLeft: Radius.circular(19),
@@ -114,7 +116,7 @@ class MessageView extends StatelessWidget {
             children: <Widget>[
               Row(
                 children: <Widget>[
-                  const Icon(Icons.public_rounded,
+                  Icon(Icons.public_rounded,
                       size: 15, color: AppColors.accent),
                   const SizedBox(width: 7),
                   Expanded(
@@ -145,7 +147,7 @@ class MessageView extends StatelessWidget {
                 constraints: const BoxConstraints(maxHeight: 260),
                 decoration: BoxDecoration(
                   color: s.codeBg,
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(AppRadius.code),
                 ),
                 padding: const EdgeInsets.symmetric(
                     horizontal: 10, vertical: 8),
@@ -193,7 +195,7 @@ class MessageView extends StatelessWidget {
   Widget _mediaCard(BuildContext context, AppSurface s, Attachment a) {
     if (a.isImage) {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.field),
         child: Image.file(
           File(a.path),
           width: 150,
@@ -204,7 +206,7 @@ class MessageView extends StatelessWidget {
             height: 150,
             decoration: BoxDecoration(
               color: s.surface,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppRadius.field),
               border: Border.all(color: s.border, width: 0.9),
             ),
             child: Center(
@@ -220,7 +222,7 @@ class MessageView extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
         color: s.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.field),
         border: Border.all(color: s.border, width: 0.9),
       ),
       child: Row(
@@ -253,13 +255,42 @@ class MessageView extends StatelessWidget {
             text: message.content,
             baseSize: 15,
             onOpenLink: onOpenLink,
+            // 流式期间不渲染卡片。InAppWebView 的 initialData **只在创建时读一次**，
+            // 所以流式中途创建的 WebView 拿到的是半截 HTML，之后又不会重载 ——
+            // 表现为"卡片不显示，重启应用才出现"。
+            // 关掉后，未完成的卡片先显示成代码块，流式结束才切成卡片，
+            // 那时 WebView 才第一次创建，拿到的就是完整内容。
+            enableCards: !message.pending,
           ),
         ),
       );
+
+      // 复制按钮。
+      //
+      // 为什么需要它：markdown 是用**裸 RichText** 渲染的，而 Flutter 的
+      // SelectionArea 只对 Text 组件生效 —— 裸 RichText 不会注册到选择系统，
+      // 所以正文根本选不中。与其把整个渲染器改成 Text.rich（改动面大、
+      // 还容易在表格/代码块里出岔子），不如直接给一个可靠的复制入口。
+      //
+      // 流式输出中不显示：复制一段还在增长的内容没有意义。
+      if (!message.pending) {
+        children.add(_CopyButton(text: message.content));
+      }
+
+      // 正文里出现网址时，在下面补一排卡片 ——
+      // 一眼能看出是网页还是 API，也能直接点开。
+      if (!message.pending) {
+        children.add(
+          LinkCards(text: message.content, onOpen: onOpenLink),
+        );
+      }
     }
 
     for (final ToolInvocation inv in message.tools) {
-      children.add(ToolCallCard(invocation: inv));
+      // 一行式显示，点开才展开参数和输出。
+      // 原来的展开卡片会把正文挤到看不见，而多数时候用户只想确认
+      // "它干了什么"，不想看输入输出的完整原文。
+      children.add(ToolLine(invocation: inv));
     }
 
     if (message.error != null && message.error!.trim().isNotEmpty) {
@@ -324,171 +355,229 @@ class MessageView extends StatelessWidget {
 }
 
 /// 一次工具调用的卡片：工具名 / 风险标签 / 具体命令 / 执行结果
-class ToolCallCard extends StatelessWidget {
-  const ToolCallCard({super.key, required this.invocation});
+/// 复制 AI 回复的原文（Markdown 源码，不是渲染后的纯文本）。
+///
+/// 复制**原文**而不是渲染结果：用户复制多半是要粘到别处继续用，
+/// 这时保留 `##`、`-`、代码围栏才是有用的；渲染后的纯文本会丢掉结构。
+/// 从 AI 回复的正文里找出网址，渲染成卡片。
+///
+/// 为什么需要：模型引用来源时通常把 URL 直接写进正文，markdown 渲染出来
+/// 就是一串蓝色的字。**看不出那是网页还是 API 接口，也没法一键打开。**
+///
+/// 这里做两件事：
+///  1. 把网址提出来做成可点的卡片（直接在内置浏览器打开）
+///  2. **区分「网页」和「API 接口」** —— 图标、配色、标签都不同。
+///     模型给出 API 地址时，用户想的是"抓一份数据看看"，
+///     而不是"用浏览器打开它"。
+class LinkCards extends StatelessWidget {
+  const LinkCards({super.key, required this.text, this.onOpen});
 
-  final ToolInvocation invocation;
+  final String text;
+  final void Function(String url)? onOpen;
+
+  /// 最多渲染几张。模型有时一口气列十几个来源，
+  /// 全铺开会把正文彻底淹没 —— 那还不如不给卡片。
+  static const int _maxCards = 4;
+
+  /// 用三引号原始字符串：URL 里可能出现的 `'` 和反引号混在普通引号里很容易写错。
+  static final RegExp _urlRe = RegExp(
+    r'''https?://[^\s<>()\[\]"'`]+''',
+    caseSensitive: false,
+  );
+
+  /// 提取去重后的网址
+  static List<String> extract(String text) {
+    final Set<String> seen = <String>{};
+    final List<String> out = <String>[];
+    for (final RegExpMatch m in _urlRe.allMatches(text)) {
+      String u = m.group(0)!;
+      // 去掉尾部粘连的标点：`见 https://a.com。` 这种在中文里非常常见
+      u = u.replaceAll(RegExp(r'[.,;:!?，。；：！？、）】»]+$'), '');
+      if (u.length < 12) continue;
+      if (seen.add(u)) out.add(u);
+      if (out.length >= _maxCards) break;
+    }
+    return out;
+  }
+
+  /// 判断是 API 接口而不是网页。
+  ///
+  /// 用启发式规则而不是发请求探测 —— 探测要花时间，而这里只决定图标长什么样，
+  /// 猜错的代价很小。**宁可快。**
+  static bool isApi(Uri uri) {
+    final String host = uri.host.toLowerCase();
+    final String path = uri.path.toLowerCase();
+    if (host.startsWith('api.') || host.contains('.api.')) return true;
+    if (path.endsWith('.json') || path.endsWith('.xml')) return true;
+    if (path.contains('/api/') ||
+        path.contains('/v1/') ||
+        path.contains('/v2/')) {
+      return true;
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final AppSurface s = AppSurface.of(context);
-    final RiskLevel level = invocation.risk.level;
+    final List<String> urls = extract(text);
+    if (urls.isEmpty) return const SizedBox.shrink();
 
-    final (Color color, String tag) = switch (invocation.status) {
-      InvocationStatus.awaitingConfirm => (AppColors.warning, '等待确认'),
-      InvocationStatus.running => (AppColors.accent, '执行中'),
-      InvocationStatus.rejected => (AppColors.danger, '已拒绝'),
-      InvocationStatus.failed => (AppColors.danger, '失败'),
-      InvocationStatus.success => switch (level) {
-          RiskLevel.safe => (AppColors.success, '只读 · 自动执行'),
-          RiskLevel.caution => (AppColors.success, '已确认执行'),
-          RiskLevel.dangerous => (AppColors.danger, '危险 · 已确认'),
-        },
-    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const SizedBox(height: 6),
+        ...urls.map((String u) => _card(context, u)),
+      ],
+    );
+  }
+
+  Widget _card(BuildContext context, String url) {
+    final AppSurface s = AppSurface.of(context);
+
+    Uri? uri;
+    try {
+      uri = Uri.parse(url);
+    } catch (_) {
+      uri = null;
+    }
+    final bool api = uri != null && isApi(uri);
+
+    final Color tint = api ? AppColors.warning : AppColors.accent;
+    final String host = uri?.host ?? url;
+    final String shownPath = uri == null
+        ? ''
+        : (uri.path.isEmpty ? '/' : uri.path) +
+            (uri.hasQuery ? '?${uri.query}' : '');
 
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(bottom: 6),
       child: SurfaceCard(
-        padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+        radius: AppRadius.field,
+        onTap: onOpen == null ? null : () => onOpen!(url),
+        child: Row(
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Text(
-                  invocation.name,
-                  style: AppFonts.body(
-                    size: 12.5,
-                    weight: FontWeight.w700,
-                    color: s.text,
-                    height: 1.2,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GlassChip(
-                  label: tag,
-                  color: color,
-                  background: color.withValues(alpha: 0.12),
-                  dense: true,
-                ),
-                const Spacer(),
-                if (invocation.status == InvocationStatus.running)
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.6,
-                      color: s.muted,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 9),
-            _commandBox(s),
-            if (invocation.risk.reasons.isNotEmpty &&
-                invocation.status != InvocationStatus.success)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: invocation.risk.reasons
-                      .map((String r) => Padding(
-                            padding: const EdgeInsets.only(bottom: 3),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text('· ',
-                                    style: AppFonts.body(
-                                        size: 12.5, color: color, height: 1.5)),
-                                Expanded(
-                                  child: Text(
-                                    r,
-                                    style: AppFonts.body(
-                                      size: 12.5,
-                                      color: s.muted,
-                                      height: 1.5,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ))
-                      .toList(),
-                ),
+            Container(
+              width: 30,
+              height: 30,
+              decoration: ShapeDecoration(
+                color: tint.withValues(alpha: 0.13),
+                shape: const CircleBorder(),
               ),
-            if (invocation.output != null &&
-                invocation.output!.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 9),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    if (invocation.status == InvocationStatus.success)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 1.5),
-                        child: Icon(Icons.check_rounded,
-                            size: 14, color: AppColors.success),
-                      ),
-                    if (invocation.status == InvocationStatus.success)
-                      const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        _clip(invocation.output!),
-                        style: AppFonts.code(
-                          size: 12.3,
-                          color: invocation.status == InvocationStatus.rejected
-                              ? s.muted
-                              : s.text,
+              child: Icon(
+                api ? Icons.data_object_rounded : Icons.public_rounded,
+                size: 16,
+                color: tint,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          host,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFonts.body(
+                            size: 13,
+                            weight: FontWeight.w600,
+                            color: s.text,
+                            height: 1.3,
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 6),
+                      // 明确标出是接口还是网页 —— 否则用户得自己看域名猜
+                      GlassChip(
+                        label: api ? 'API' : '网页',
+                        dense: true,
+                        color: tint,
+                      ),
+                    ],
+                  ),
+                  if (shownPath.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(
+                      shownPath,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppFonts.code(size: 10.5, color: s.muted),
                     ),
                   ],
-                ),
+                ],
               ),
+            ),
+            if (onOpen != null)
+              Icon(Icons.chevron_right_rounded, size: 19, color: s.muted),
           ],
         ),
       ),
     );
   }
+}
 
-  static String _clip(String s) {
-    final String t = s.trim();
-    if (t.length <= 1500) return t;
-    return '${t.substring(0, 1500)}\n…（已截断）';
+class _CopyButton extends StatefulWidget {
+  const _CopyButton({required this.text});
+
+  final String text;
+
+  @override
+  State<_CopyButton> createState() => _CopyButtonState();
+}
+
+class _CopyButtonState extends State<_CopyButton> {
+  bool _done = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _done = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _done = false);
   }
 
-  Widget _commandBox(AppSurface s) {
-    final String text = _displayCommand();
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: s.codeBg,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      child: SelectableText(
-        text,
-        style: AppFonts.code(size: 12.4, color: s.text),
+  @override
+  Widget build(BuildContext context) {
+    final AppSurface s = AppSurface.of(context);
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _copy,
+        child: Padding(
+          // 触摸区要够大：文字只有 11px，不给内边距点不中
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                _done ? Icons.check_rounded : Icons.copy_rounded,
+                size: 13,
+                color: _done ? AppColors.success : s.muted,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                _done ? '已复制' : '复制',
+                style: AppFonts.body(
+                  size: 11.5,
+                  color: _done ? AppColors.success : s.muted,
+                  height: 1.2,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
-
-  String _displayCommand() {
-    final Map<String, dynamic> a = invocation.args;
-    if (a.containsKey('command')) return a['command'].toString();
-    if (a.containsKey('action') && a.containsKey('path')) {
-      return '${a['action']} ${a['path']}';
-    }
-    if (a.containsKey('action')) {
-      final String pkg = a['package']?.toString() ?? '';
-      return pkg.isEmpty
-          ? a['action'].toString()
-          : '${a['action']} $pkg';
-    }
-    if (a.containsKey('query')) return '搜索：${a['query']}';
-    return invocation.argumentsJson;
-  }
 }
+
 
 /// 危险操作确认弹窗。返回 true 表示放行。
 ///
@@ -547,7 +636,7 @@ Future<bool> showRiskConfirmDialog(
                 width: double.infinity,
                 decoration: BoxDecoration(
                   color: s.codeBg,
-                  borderRadius: BorderRadius.circular(11),
+                  borderRadius: BorderRadius.circular(AppRadius.code),
                 ),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 11, vertical: 9),

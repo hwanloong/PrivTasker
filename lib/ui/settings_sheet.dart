@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/overlay.dart';
 import '../core/productivity.dart';
+import '../core/rules.dart';
 import '../core/selfhosted_search.dart';
 import '../core/store.dart';
 import '../plugins/plugin.dart';
@@ -10,6 +11,8 @@ import '../theme/glass.dart';
 import '../tools/browser_tool.dart';
 import 'backup_actions.dart';
 import 'plugins_sheet.dart';
+import 'python_console_page.dart';
+import 'rules_page.dart';
 import 'storage_sheet.dart';
 
 Future<void> showSettingsSheet(
@@ -174,6 +177,69 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     });
   }
 
+  /// 主题色选择器。
+  ///
+  /// 只给「种子色」，不给整套配色 —— Material You 的做法是
+  /// `ColorScheme.fromSeed` 从一个种子推导出全部色板（容器色、强调色、
+  /// 暗色变体…），所以这里 8 个色块就够覆盖整套明暗配色。
+  Widget _colorPicker(AppSurface s) {
+    final int current = widget.settings.seedColor;
+
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: AppColors.seedPresets.map(((String, Color) preset) {
+              final (String name, Color color) = preset;
+              final bool active = color.toARGB32() == current;
+              return Tooltip(
+                message: name,
+                child: GestureDetector(
+                  onTap: () => widget.settings.update(
+                    () => widget.settings.seedColor = color.toARGB32(),
+                  ),
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: active
+                          ? Border.all(color: s.text, width: 2.5)
+                          : null,
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.35),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: active
+                        ? const Icon(Icons.check_rounded,
+                            size: 19, color: Colors.white)
+                        : null,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 11),
+          Text(
+            // 说明清楚它改的是什么范围，否则用户换完色发现"整个界面都变了"
+            // 会以为是 bug —— 这其实是 Material You 的正常行为。
+            '选一个种子色，整套配色（卡片、按钮、强调色，含暗色模式）都会由它推导。',
+            style: AppFonts.body(size: 11.8, color: s.muted, height: 1.5),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 图标 + 标题 + 说明 + 右箭头的可点条目
   Widget _entryCard(
     AppSurface s, {
@@ -320,7 +386,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           maxHeight: MediaQuery.of(context).size.height * 0.88,
         ),
         decoration: BoxDecoration(
-          color: s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+          color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           border: Border(top: BorderSide(color: s.border, width: 0.8)),
         ),
@@ -332,7 +398,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
                 children: <Widget>[
-                  _section(s, '接口'),
+                  _section(s, '外观'),
+                  _colorPicker(s),
+
+                  _section(s, '接口与模型'),
                   _field(
                     s,
                     label: 'API Key',
@@ -357,7 +426,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     hint: 'https://api.deepseek.com',
                   ),
 
-                  _section(s, '模型'),
+                  // 模型并入「接口与模型」
                   ...Settings.modelPresets.map(((String, String) m) {
                     final bool active = _model.text.trim() == m.$1;
                     return Padding(
@@ -396,7 +465,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                               ),
                             ),
                             if (active)
-                              const Icon(Icons.check_circle_rounded,
+                              Icon(Icons.check_circle_rounded,
                                   size: 19, color: AppColors.accent),
                           ],
                         ),
@@ -410,7 +479,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     hint: 'deepseek-flash',
                   ),
 
-                  _section(s, '思考模式'),
+                  // 思考模式并入「接口与模型」—— 它也是"怎么用模型"的一部分，
+                  // 单独一节会让设置页看起来比实际复杂
                   _switchRow(
                     s,
                     label: '开启思考模式',
@@ -457,7 +527,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                               ),
                               if (active) ...<Widget>[
                                 const SizedBox(width: 8),
-                                const Icon(Icons.check_circle_rounded,
+                                Icon(Icons.check_circle_rounded,
                                     size: 17, color: AppColors.accent),
                               ],
                             ],
@@ -508,50 +578,16 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   const SizedBox(height: 10),
                   _overlayRow(s),
 
-                  _section(s, '联网'),
+                  _section(s, '联网与识图'),
                   _note(
                     s,
                     '搜索会按下列顺序尝试，直到拿到结果：\n'
-                    '0. 自建搜索服务（可选）—— 自己部署的 agent-web-search 这类服务。'
-                    '它替我们做完了抓取 → 正文提取 → 去噪 → 分块 → 向量化 → 相关度排序，'
-                    '拿回来就是能直接读的资料，还自带提示注入清洗。质量最高，但要自己部署。\n'
-                    '1. DeepSeek 服务端搜索 —— 走 Responses API 的 web_search，'
-                    '不受反爬影响、也不用等渲染。\n'
-                    '2. Tavily API Key —— 通用网页搜索，结果完整稳定。\n'
+                    '1. Tavily API Key —— 通用网页搜索，结果完整稳定。'
+                    '填了 Key 才走这条。\n'
+                    '2. Bing 直连 —— 普通 HTTP 请求，最快，不需要任何配置。\n'
                     '3. 内置浏览器抓取 —— 用 WebView 打开搜索引擎，'
-                    '真实浏览器环境，绕开服务端抓取被反爬拦截的问题。\n'
+                    '真实浏览器环境，用于需要 JS 渲染的页面。\n'
                     '另外 fetch 抓取指定网址任何时候都能用。',
-                  ),
-                  _field(
-                    s,
-                    label: '自建搜索服务地址（可选）',
-                    controller: _selfHostedUrl,
-                    hint: 'http://192.168.1.10:8000',
-                  ),
-                  Row(
-                    children: <Widget>[
-                      GlassButton(
-                        label: '测试连接',
-                        icon: Icons.wifi_tethering_rounded,
-                        fontSize: 12.5,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 7),
-                        onTap: _testSelfHosted,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _selfHostedStatus ?? '',
-                          style: AppFonts.body(
-                            size: 12,
-                            color: _selfHostedOk == true
-                                ? AppColors.success
-                                : AppColors.danger,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                   Text(
                     '联网方式',
@@ -580,7 +616,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                               ),
                             ),
                             if (active)
-                              const Icon(Icons.check_circle_rounded,
+                              Icon(Icons.check_circle_rounded,
                                   size: 17, color: AppColors.accent),
                           ],
                         ),
@@ -624,7 +660,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     hint: '填了会优先用 Tavily，结果更完整',
                   ),
 
-                  _section(s, '识图'),
+                  // 识图并入「联网与识图」—— 视觉模型同样是"选一个外部服务"
                   _note(
                     s,
                     'deepseek-flash 本身支持图像理解，识图默认就走它，不需要额外配置。'
@@ -651,7 +687,30 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     hint: 'deepseek-flash',
                   ),
 
-                  _section(s, '扩展'),
+                  _section(s, '数据与扩展'),
+                  _entryCard(
+                    s,
+                    icon: Icons.rule_folder_outlined,
+                    title: '自定义规则',
+                    desc: '当……的时候，就…… —— 用自己的话规定 Agent 的行为',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) =>
+                            RulesPage(store: RuleStore.instance),
+                      ),
+                    ),
+                  ),
+                  _entryCard(
+                    s,
+                    icon: Icons.terminal_rounded,
+                    title: 'Python 控制台',
+                    desc: '内嵌 CPython 3.13，零配置。在这里直接跑代码验证它是否可用',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) => const PythonConsolePage(),
+                      ),
+                    ),
+                  ),
                   _entryCard(
                     s,
                     icon: Icons.extension_outlined,
@@ -723,7 +782,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     },
                   ),
 
-                  _section(s, '存储'),
+                  // 存储并入「数据与扩展」—— 插件、导入导出、存储清理
+                  // 都是"数据从哪来、往哪去"，归到一起更好找
                   SurfaceCard(
                     padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
                     onTap: () => showStorageSheet(
@@ -732,7 +792,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     ),
                     child: Row(
                       children: <Widget>[
-                        const Icon(Icons.folder_outlined,
+                        Icon(Icons.folder_outlined,
                             size: 18, color: AppColors.accent),
                         const SizedBox(width: 11),
                         Expanded(
@@ -837,7 +897,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           Container(
             decoration: BoxDecoration(
               color: s.surface,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.code),
               border: Border.all(color: s.border, width: 0.9),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -974,7 +1034,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: AppColors.accent.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.code),
           border: Border.all(
             color: AppColors.accent.withValues(alpha: 0.25),
             width: 0.8,
@@ -983,8 +1043,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Padding(
-              padding: EdgeInsets.only(top: 1),
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
               child: Icon(Icons.info_outline_rounded,
                   size: 16, color: AppColors.accent),
             ),

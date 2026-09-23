@@ -64,7 +64,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
         maxHeight: MediaQuery.of(context).size.height * 0.85,
       ),
       decoration: BoxDecoration(
-        color: s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(top: BorderSide(color: s.border, width: 0.8)),
       ),
@@ -239,7 +239,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
           ),
           const SizedBox(height: 10),
           ClipRRect(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
             child: LinearProgressIndicator(
               value: limit <= 0 ? 0 : ratio,
               minHeight: 6,

@@ -157,8 +157,8 @@ Future<Widget> _buildApp({
 
   return MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: AppTheme.light(),
-    darkTheme: AppTheme.dark(),
+    theme: AppTheme.light(AppColors.defaultSeed),
+    darkTheme: AppTheme.dark(AppColors.defaultSeed),
     themeMode:
         brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
     home: ChatPage(
@@ -260,7 +260,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
+        theme: AppTheme.light(AppColors.defaultSeed),
         home: Scaffold(
           backgroundColor: AppColors.lightBg,
           body: SafeArea(

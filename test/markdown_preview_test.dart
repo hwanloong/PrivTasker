@@ -124,7 +124,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
+        theme: AppTheme.light(AppColors.defaultSeed),
         home: Scaffold(
           backgroundColor: AppColors.lightBg,
           body: SafeArea(

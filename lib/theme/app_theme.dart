@@ -77,7 +77,31 @@ class AppColors {
   static const Color lightBg = Color(0xFFFFFFFF);
   static const Color darkBg = Color(0xFF000000);
 
-  static const Color accent = Color(0xFF4F7DF3);
+  /// 主题色。**不再是 const** —— 它由用户在设置里选的「种子色」决定。
+  ///
+  /// 为什么保留静态字段而不是让调用方读 `Theme.of(context).colorScheme`：
+  /// 全项目有 48 处直接引用 `AppColors.accent`，改成 context 查找要动几十个
+  /// 文件，还有在 build 之外（回调、异步逻辑里）拿不到 context 的风险。
+  /// 用「构建主题时写入」这个折中，改动面最小、也不会漏。
+  static Color accent = defaultSeed;
+
+  /// 默认种子色
+  static const Color defaultSeed = Color(0xFF4F7DF3);
+
+  /// 可选的主题色。用 Material You 的思路：选一个种子色，
+  /// 整套配色（容器色、强调色、暗色变体）由 `ColorScheme.fromSeed` 推导出来 ——
+  /// 所以这里只需要给种子，不需要给每套配色配一整套颜色。
+  static const List<(String, Color)> seedPresets = <(String, Color)>[
+    ('默认蓝', Color(0xFF4F7DF3)),
+    ('青碧', Color(0xFF00897B)),
+    ('森绿', Color(0xFF2E7D32)),
+    ('琥珀', Color(0xFFF57C00)),
+    ('珊瑚', Color(0xFFE5533D)),
+    ('品红', Color(0xFFC2185B)),
+    ('紫罗兰', Color(0xFF6750A4)),
+    ('石墨', Color(0xFF546E7A)),
+  ];
+
   static const Color danger = Color(0xFFFF453A);
   static const Color success = Color(0xFF34C759);
   static const Color warning = Color(0xFFFF9F0A);
@@ -85,6 +109,31 @@ class AppColors {
   /// 中性色：用于「无 Shizuku」这类「不是错误、只是缺失」的状态，
   /// 避免用红色吓唬用户以为应用坏了。
   static const Color neutral = Color(0xFF8A8A92);
+}
+
+/// 圆角刻度。
+///
+/// 之前全项目散落着 9/10/11/12/14/16/23/24 八种半径，同一屏里相邻两个
+/// 元素常常只差 1–2px —— 说不出哪里不对，但看着就是"膈应"。
+/// 统一成一套刻度就消除了这种噪声：**要么明显不同，要么完全一致**，
+/// 不要"差不多但不一样"。
+class AppRadius {
+  const AppRadius._();
+
+  /// 代码块、小色块
+  static const double code = 12;
+
+  /// 输入框、列表项、小卡片
+  static const double field = 16;
+
+  /// 普通卡片
+  static const double card = 24;
+
+  /// 弹窗、面板的顶部圆角
+  static const double sheet = 28;
+
+  /// 全圆角（胶囊按钮、圆形图标按钮）
+  static const double pill = 999;
 }
 
 /// 通过 ThemeExtension 下发「面 / 描边 / 代码底 / 次要文字」四组颜色，
@@ -99,7 +148,16 @@ class AppSurface extends ThemeExtension<AppSurface> {
     required this.muted,
     required this.barBackground,
     required this.scrim,
+    required this.isDark,
   });
+
+  /// 是否暗色。
+  ///
+  /// **必须用这个字段判断明暗，不要再写 `s == AppSurface.dark`。**
+  /// 那是个陷阱：颜色现在由种子色推导（`fromScheme` 返回新实例），
+  /// 而 `AppSurface.dark` 是静态常量 —— 两者永远不相等，
+  /// 判断会恒为 false，暗色模式就整片变白。
+  final bool isDark;
 
   /// 卡片底色
   final Color surface;
@@ -127,6 +185,7 @@ class AppSurface extends ThemeExtension<AppSurface> {
     muted: Color(0xFF82868F),
     barBackground: Color(0xB8FFFFFF), // 72% 白
     scrim: Color(0x57000000),
+    isDark: false,
   );
 
   static const AppSurface dark = AppSurface(
@@ -137,7 +196,40 @@ class AppSurface extends ThemeExtension<AppSurface> {
     muted: Color(0xFF8A8A92),
     barBackground: Color(0xB30A0A0C), // 70% 近黑
     scrim: Color(0x8A000000),
+    isDark: true,
   );
+
+  /// 从 Material You 配色方案推导「面 / 描边 / 代码底 / 次要文字」。
+  ///
+  /// 这是 Material You 的核心：**表面色由种子色推导**，所以换个主题色，
+  /// 卡片底色、代码块底色、次要文字色会整体跟着变 —— 而不是只有强调色变。
+  /// 背景仍保持纯白/纯黑（这是明确要求），只有"面"带主题色。
+  factory AppSurface.fromScheme(ColorScheme s, {required bool dark}) {
+    if (dark) {
+      return AppSurface(
+        surface: s.surfaceContainerHigh,
+        border: s.outlineVariant.withValues(alpha: 0.45),
+        codeBg: s.surfaceContainerHighest,
+        text: s.onSurface,
+        muted: s.onSurfaceVariant,
+        // 栏底色必须**足够透**，否则 BackdropFilter 的模糊被盖住看不见。
+        // 之前 0.90 基本等于不透明 —— 模糊其实一直在跑，只是白跑。
+        barBackground: s.surface.withValues(alpha: 0.70),
+        scrim: Colors.black.withValues(alpha: 0.60),
+        isDark: true,
+      );
+    }
+    return AppSurface(
+      surface: s.surfaceContainerLow,
+      border: s.outlineVariant.withValues(alpha: 0.70),
+      codeBg: s.surfaceContainerHighest,
+      text: s.onSurface,
+      muted: s.onSurfaceVariant,
+      barBackground: s.surface.withValues(alpha: 0.72),
+      scrim: Colors.black.withValues(alpha: 0.40),
+      isDark: false,
+    );
+  }
 
   static AppSurface of(BuildContext context) {
     return Theme.of(context).extension<AppSurface>() ??
@@ -153,6 +245,7 @@ class AppSurface extends ThemeExtension<AppSurface> {
     Color? muted,
     Color? barBackground,
     Color? scrim,
+    bool? isDark,
   }) {
     return AppSurface(
       surface: surface ?? this.surface,
@@ -162,6 +255,7 @@ class AppSurface extends ThemeExtension<AppSurface> {
       muted: muted ?? this.muted,
       barBackground: barBackground ?? this.barBackground,
       scrim: scrim ?? this.scrim,
+      isDark: isDark ?? this.isDark,
     );
   }
 
@@ -176,6 +270,7 @@ class AppSurface extends ThemeExtension<AppSurface> {
       muted: Color.lerp(muted, other.muted, t)!,
       barBackground: Color.lerp(barBackground, other.barBackground, t)!,
       scrim: Color.lerp(scrim, other.scrim, t)!,
+      isDark: t < 0.5 ? isDark : other.isDark,
     );
   }
 }
@@ -215,17 +310,26 @@ class AppTheme {
   static SystemUiOverlayStyle systemUiFor(Brightness brightness) =>
       brightness == Brightness.dark ? darkSystemUi : lightSystemUi;
 
-  static ThemeData light() => _build(Brightness.light);
-  static ThemeData dark() => _build(Brightness.dark);
+  static ThemeData light(Color seed) => _build(Brightness.light, seed);
+  static ThemeData dark(Color seed) => _build(Brightness.dark, seed);
 
-  static ThemeData _build(Brightness brightness) {
+  static ThemeData _build(Brightness brightness, Color seed) {
     final bool isDark = brightness == Brightness.dark;
-    final AppSurface surface = isDark ? AppSurface.dark : AppSurface.light;
+
+    // 把用户选的种子色写进静态字段 —— 之后所有 `AppColors.accent`
+    // 引用都会拿到新值，不需要逐处改。
+    AppColors.accent = seed;
 
     final ColorScheme scheme = ColorScheme.fromSeed(
-      seedColor: AppColors.accent,
+      seedColor: seed,
       brightness: brightness,
-    ).copyWith(surface: isDark ? AppColors.darkBg : AppColors.lightBg);
+    ).copyWith(
+      // 背景保持纯白/纯黑（这是明确要求），但**卡片/容器色由种子色推导** ——
+      // 这正是 Material You 的做法：背景干净，表面带一层极淡的主题色。
+      surface: isDark ? AppColors.darkBg : AppColors.lightBg,
+    );
+
+    final AppSurface surface = AppSurface.fromScheme(scheme, dark: isDark);
 
     final ThemeData base = ThemeData(
       useMaterial3: true,
@@ -264,7 +368,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           side: BorderSide(color: surface.border),
         ),
         titleTextStyle: textTheme.titleMedium?.copyWith(
@@ -278,7 +382,7 @@ class AppTheme {
         contentTextStyle: textTheme.bodyMedium?.copyWith(color: surface.text),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadius.field),
           side: BorderSide(color: surface.border),
         ),
       ),
@@ -298,17 +402,20 @@ class AppTheme {
         isDense: true,
         filled: true,
         fillColor: surface.surface,
+        // 圆角用 999 会让 OutlineInputBorder 在圆角处描边畸变（半径被夹到
+        // 高度的一半，四条边的弧长不一致，看起来是歪的）。
+        // Material 3 的输入框用 24 —— 够圆，且渲染稳定。
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           borderSide: BorderSide(color: surface.border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           borderSide: BorderSide(color: surface.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
-          borderSide: const BorderSide(color: AppColors.accent, width: 1.2),
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          borderSide: BorderSide(color: AppColors.accent, width: 1.6),
         ),
         hintStyle: AppFonts.body(size: 14.5, color: surface.muted),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -322,7 +429,7 @@ class AppTheme {
         textColor: surface.text,
         iconColor: surface.text,
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
+      progressIndicatorTheme: ProgressIndicatorThemeData(
         color: AppColors.accent,
       ),
       // 统一开关样式。用 WidgetStateProperty 而不是已废弃的 activeColor。

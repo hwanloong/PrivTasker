@@ -77,10 +77,16 @@ class Settings extends ChangeNotifier {
   /// 相关度排序」整条链，拿回来就是能直接读的资料，还自带提示注入清洗。
   String selfHostedSearchUrl = '';
 
+  /// 联网方式。
+  ///
+  /// 自建搜索服务与 DeepSeek 服务端搜索已移除：
+  /// · 自建服务要自己部署 Docker + SearXNG，门槛太高，而且跑在手机上
+  ///   仍然受手机网络限制（墙的问题没解决，只是换了台机器）；
+  /// · DeepSeek 的 `web_search` 已被官方关闭 —— 响应里不再出现
+  ///   `web_search_call`，实测确认，官方文档也一直标着「忽略」。
   static const List<(String, String)> searchModePresets = <(String, String)>[
-    ('auto', '自动：自建 → 服务端 → Tavily → 浏览器，依次尝试'),
-    ('selfhosted', '只用自建搜索服务'),
-    ('deepseek', '只用 DeepSeek 服务端搜索（web_search）'),
+    ('auto', '自动：Tavily → Bing 直连 → 浏览器，依次尝试'),
+    ('tavily', '只用 Tavily（需要 API Key）'),
     ('browser', '只用内置浏览器抓取'),
   ];
 
@@ -101,6 +107,13 @@ class Settings extends ChangeNotifier {
   /// 悬浮窗则始终在最上层。需要 SYSTEM_ALERT_WINDOW 权限。
   bool useOverlayConfirm = true;
 
+  /// 主题种子色（ARGB 整数）。
+  ///
+  /// 存整数而不是 Color：`shared_preferences` 没有 Color 类型，
+  /// 而 Color 的 value 在做过色彩空间处理后不再是稳定的 int，
+  /// 所以自己存 32 位 ARGB 更可靠。
+  int seedColor = 0xFF4F7DF3;
+
   void _read() {
     apiKey = _prefs.getString('apiKey') ?? '';
     baseUrl = _prefs.getString('baseUrl') ?? 'https://api.deepseek.com';
@@ -118,6 +131,7 @@ class Settings extends ChangeNotifier {
     visionModel = _prefs.getString('visionModel') ?? 'deepseek-flash';
     autoApproveSafe = _prefs.getBool('autoApproveSafe') ?? true;
     useOverlayConfirm = _prefs.getBool('useOverlayConfirm') ?? true;
+    seedColor = _prefs.getInt('seedColor') ?? 0xFF4F7DF3;
   }
 
   Future<void> update(void Function() mutate) async {
@@ -140,6 +154,7 @@ class Settings extends ChangeNotifier {
     await _prefs.setString('visionModel', visionModel);
     await _prefs.setBool('autoApproveSafe', autoApproveSafe);
     await _prefs.setBool('useOverlayConfirm', useOverlayConfirm);
+    await _prefs.setInt('seedColor', seedColor);
   }
 
   bool get configured => apiKey.trim().isNotEmpty;

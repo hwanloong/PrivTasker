@@ -14,10 +14,18 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 class WebViewLoader {
   const WebViewLoader._();
 
-  /// 移动端 UA。用桌面 UA 有些站点会返回不同（更重）的页面。
+  /// 移动端 UA。
+  ///
+  /// 两个作用：
+  ///  1. 桌面 UA 有些站点会返回更重的页面；
+  ///  2. **盖掉系统 WebView 的真实版本号** —— 这点更重要。
+  ///     很多国产手机的 Android System WebView 长期不更新（没有 Play 商店），
+  ///     UA 里报的是很老的 Chrome 版本，正常网站会直接回一句
+  ///     「请更换浏览器」然后拒绝服务。我们只是要抓文本，
+  ///     报一个正常的现代版本即可，不必暴露系统组件的实际版本。
   static const String mobileUserAgent =
-      'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) '
-      'Chrome/124.0 Mobile Safari/537.36';
+      'Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) '
+      'Chrome/131.0.0.0 Mobile Safari/537.36';
 
   /// 打开 [url]，反复执行 [js] 直到 [isDone] 为真或尝试次数用尽。
   /// 返回 null 表示主文档加载失败或整体超时。
@@ -43,6 +51,10 @@ class WebViewLoader {
           domStorageEnabled: true,
           transparentBackground: true,
           mediaPlaybackRequiresUserGesture: true,
+          // **必须显式设置**。不设的话 WebView 用系统默认 UA，
+          // 而系统 WebView 老旧时会把真实版本号报出去，站点据此判定
+          // 「浏览器太旧」并拒绝返回内容。
+          userAgent: mobileUserAgent,
           // 不加载图片：抓文本不需要，能明显加快加载
           blockNetworkImage: true,
           useShouldInterceptRequest: false,
@@ -90,18 +102,30 @@ class WebViewLoader {
         },
       );
 
-      await headless.run();
+      // **必须给 run() 也加超时**。
+      //
+      // run() 是在等平台侧创建 WebView 实例。如果系统 WebView 组件有问题
+      // （版本太旧、被禁用、或损坏），这一步会**永远不返回** ——
+      // 而原来的超时只包住了下面的 completer.future，
+      // 结果就是整个工具卡死、界面一直转圈，超时形同虚设。
+      await headless.run().timeout(_createTimeout);
+
       return await completer.future.timeout(timeout);
     } catch (_) {
       return null;
     } finally {
       try {
-        await headless?.dispose();
+        // dispose 同样可能卡住（webview 没建起来时），一并加超时
+        await headless?.dispose().timeout(const Duration(seconds: 5));
       } catch (_) {
         // 忽略清理失败
       }
     }
   }
+
+  /// WebView 实例创建的超时。超过就认定这台机器的 WebView 组件不可用，
+  /// 直接放弃 —— 宁可快速失败，也不要无限转圈。
+  static const Duration _createTimeout = Duration(seconds: 12);
 
   /// 自适应的轮询间隔。
   ///

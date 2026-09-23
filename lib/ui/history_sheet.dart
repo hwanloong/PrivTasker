@@ -53,7 +53,7 @@ class _HistorySheetState extends State<_HistorySheet> {
         maxHeight: MediaQuery.of(context).size.height * 0.82,
       ),
       decoration: BoxDecoration(
-        color: s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(top: BorderSide(color: s.border, width: 0.8)),
       ),

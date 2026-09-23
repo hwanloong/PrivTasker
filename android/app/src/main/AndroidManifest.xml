@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
+    <!-- Termux 连接：声明后才能用 com.termux.RUN_COMMAND 请 Termux 代跑命令。
+         光有这行不够，用户还必须在 Termux 里打开 allow-external-apps。 -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND"/>
+
     <!-- 应用管理需要枚举已安装应用；这是自用工具，故申请该权限 -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
@@ -78,5 +82,8 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Android 11+ 的包可见性：不声明的话 getPackageInfo("com.termux")
+             会直接抛 NameNotFoundException，我们就"看不到"Termux 装没装。 -->
+        <package android:name="com.termux"/>
     </queries>
 </manifest>

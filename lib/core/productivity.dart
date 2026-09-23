@@ -12,6 +12,7 @@ class Note {
     List<String>? tags,
     DateTime? createdAt,
     DateTime? updatedAt,
+    this.isMarkdown = false,
   })  : tags = tags ?? <String>[],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
@@ -23,6 +24,13 @@ class Note {
   final DateTime createdAt;
   DateTime updatedAt;
 
+  /// 正文按 Markdown 渲染，还是按纯文本原样显示。
+  ///
+  /// 存成**每条笔记自己的属性**，而不是全局设置 ——
+  /// 记代码片段、贴日志时想要纯文本；写文档、列清单时想要 Markdown。
+  /// 这个需求跟着内容走，不跟着应用走。
+  bool isMarkdown;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'title': title,
@@ -30,6 +38,7 @@ class Note {
         'tags': tags,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
+        'isMarkdown': isMarkdown,
       };
 
   static Note fromJson(Map<String, dynamic> j) => Note(
@@ -43,6 +52,9 @@ class Note {
             DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
         updatedAt:
             DateTime.tryParse(j['updatedAt']?.toString() ?? '') ?? DateTime.now(),
+        // 旧数据没有这个字段，默认纯文本 —— 不要默认 Markdown，
+        // 否则以前随手记的内容会被当成 Markdown 渲染得乱七八糟
+        isMarkdown: j['isMarkdown'] == true,
       );
 }
 

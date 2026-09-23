@@ -12,7 +12,9 @@ import '../core/metrics.dart';
 import '../core/models.dart';
 import '../core/overlay.dart';
 import '../core/productivity.dart';
+import '../core/python.dart';
 import '../core/store.dart';
+import '../core/termux.dart';
 import '../core/web_fetch.dart';
 import '../plugins/plugin.dart';
 import '../shizuku/shizuku_service.dart';
@@ -22,6 +24,9 @@ import '../tools/android_tools.dart';
 import '../tools/browser_tool.dart';
 import '../tools/extra_tools.dart';
 import '../tools/productivity_tools.dart';
+import '../tools/python_tool.dart';
+import '../tools/rule_tool.dart';
+import '../tools/termux_tool.dart';
 import '../tools/tool.dart';
 import 'history_sheet.dart';
 import 'performance_sheet.dart';
@@ -149,6 +154,28 @@ class _ChatPageState extends State<ChatPage> {
       const NotesTool(),
       const TasksTool(),
     ]);
+
+    // Termux 不依赖 Shizuku，但它依赖"用户装了 Termux"。
+    // 只有真的可用（或还没验证过）时才注册 —— 否则模型会去调它、
+    // 拿到一句"未安装"，白白浪费一轮。
+    if (TermuxService.instance.canAttempt) {
+      r.register(const TermuxTool());
+    }
+
+    // 内嵌 Python 是**应用自带**的，**无条件注册**。
+    //
+    // 这里原来写成"可用时才注册"，结果是个很糟的失败模式：
+    // Python 起不来 → 工具从注册表消失 → agent 压根不知道有这东西
+    // → 用户看到的是"agent 引用不了 python"，**完全看不到真正的原因**。
+    //
+    // 把失败藏起来比失败本身更糟。现在无条件注册，
+    // 真出问题时工具会返回明确的错误信息，用户和模型都能看到。
+    r.register(const PythonTool());
+
+    // 自定义规则：让 agent 能把用户的长期偏好**落成真实规则**，
+    // 而不是嘴上说"记住了"下一轮就忘。所有写操作都会被风险分级
+    // 拦下并要求用户确认。
+    r.register(const RuleTool());
 
     for (final PluginTool t in widget.plugins.enabledTools()) {
       if (r.byName(t.name) != null) continue;
@@ -308,7 +335,7 @@ class _ChatPageState extends State<ChatPage> {
             Container(
               decoration: BoxDecoration(
                 color: s.surface,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadius.code),
                 border: Border.all(color: s.border, width: 0.9),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -357,7 +384,7 @@ class _ChatPageState extends State<ChatPage> {
       backgroundColor: Colors.transparent,
       builder: (BuildContext ctx) => Container(
         decoration: BoxDecoration(
-          color: s == AppSurface.dark ? AppColors.darkBg : AppColors.lightBg,
+          color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           border: Border(top: BorderSide(color: s.border, width: 0.8)),
         ),
@@ -595,38 +622,84 @@ class _ChatPageState extends State<ChatPage> {
 
   // ------------------------------------------------------------------ 构建
 
+  // 顶部/底部栏的实测高度。
+  //
+  // 为什么要量：玻璃的模糊只能作用于"从它下面经过的内容"。
+  // 原来头部和输入栏是 Column 的兄弟节点，消息列表夹在中间 ——
+  // **列表永远不会滚到栏下面**，BackdropFilter 一直在跑却什么都模糊不到。
+  //
+  // 改成 Stack 之后列表铺满整个高度，用 padding 让开两条栏的位置，
+  // 滚动时内容就真的从栏下穿过，模糊才看得见。
+  // 而 padding 必须等于栏的实际高度，所以这里量一次。
+  final GlobalKey _headerKey = GlobalKey();
+  final GlobalKey _composerKey = GlobalKey();
+  double _headerH = 0;
+  double _composerH = 0;
+
+  void _measureBars() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final double h = (_headerKey.currentContext?.findRenderObject()
+                  as RenderBox?)
+              ?.size
+              .height ??
+          0;
+      final double c = (_composerKey.currentContext?.findRenderObject()
+                  as RenderBox?)
+              ?.size
+              .height ??
+          0;
+      // 只在真的变了才 setState，否则会无限重建
+      if ((h - _headerH).abs() > 0.5 || (c - _composerH).abs() > 0.5) {
+        setState(() {
+          _headerH = h;
+          _composerH = c;
+        });
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final Conversation conv = _conv;
+    _measureBars();
 
     return Scaffold(
       backgroundColor: Theme.of(context).brightness == Brightness.dark
           ? AppColors.darkBg
           : AppColors.lightBg,
-      body: Column(
+      // 用 Stack 而不是 Column：列表要**铺满整个高度**并从两条栏下面穿过，
+      // 否则玻璃模糊没有作用对象（详见 _measureBars 的注释）。
+      body: Stack(
         children: <Widget>[
-          _header(),
-          Expanded(
-            child: Stack(
-              children: <Widget>[
-                _messageList(conv),
-                // 往上翻看历史时，一键跳回最新消息
-                if (!_atBottom)
-                  Positioned(
-                    right: 16,
-                    bottom: 14,
-                    child: GlassIconButton(
-                      icon: Icons.arrow_downward_rounded,
-                      tooltip: '回到底部',
-                      size: 38,
-                      iconSize: 19,
-                      onTap: _scrollToEnd,
-                    ),
-                  ),
-              ],
-            ),
+          Positioned.fill(
+            child: _messageList(conv, topInset: _headerH, bottomInset: _composerH),
           ),
-          _composer(),
+          // 往上翻看历史时，一键跳回最新消息
+          if (!_atBottom)
+            Positioned(
+              right: 16,
+              bottom: _composerH + 14,
+              child: GlassIconButton(
+                icon: Icons.arrow_downward_rounded,
+                tooltip: '回到底部',
+                size: 38,
+                iconSize: 19,
+                onTap: _scrollToEnd,
+              ),
+            ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: KeyedSubtree(key: _headerKey, child: _header()),
+          ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: KeyedSubtree(key: _composerKey, child: _composer()),
+          ),
         ],
       ),
     );
@@ -754,14 +827,25 @@ class _ChatPageState extends State<ChatPage> {
     if (mounted) _snack('已发起授权请求，请在系统弹窗中允许');
   }
 
-  Widget _messageList(Conversation conv) {
+  Widget _messageList(
+    Conversation conv, {
+    double topInset = 0,
+    double bottomInset = 0,
+  }) {
     if (conv.messages.isEmpty) {
-      return _emptyState();
+      return Padding(
+        padding: EdgeInsets.only(top: topInset, bottom: bottomInset),
+        child: _emptyState(),
+      );
     }
 
     return ListView.builder(
       controller: _scroll,
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+      // 上下内边距 = 两条栏的实测高度。列表本身铺满整个屏幕，
+      // 靠 padding 让内容从栏下方开始 —— 这样滚动时消息会**从栏下面穿过**，
+      // 玻璃的模糊才有东西可模糊。
+      // 首次布局时测量值还是 0，会闪一下，但下一帧就修正了。
+      padding: EdgeInsets.fromLTRB(16, topInset + 6, 16, bottomInset + 14),
       itemCount: conv.messages.length,
       itemBuilder: (BuildContext context, int i) {
         return MessageView(
@@ -946,7 +1030,7 @@ class _ChatPageState extends State<ChatPage> {
               padding: const EdgeInsets.only(bottom: 9),
               child: Row(
                 children: <Widget>[
-                  const SizedBox(
+                  SizedBox(
                     width: 13,
                     height: 13,
                     child: CircularProgressIndicator(
@@ -969,20 +1053,31 @@ class _ChatPageState extends State<ChatPage> {
               GlassIconButton(
                 icon: Icons.add_rounded,
                 tooltip: '发送图片或文件',
-                size: 42,
-                iconSize: 21,
+                size: 46,
+                iconSize: 22,
                 onTap: _busy ? null : _showAttachMenu,
               ),
               const SizedBox(width: 9),
               Expanded(
                 child: Container(
-                  decoration: BoxDecoration(
+                  // 用 ShapeDecoration + side，而不是 BoxDecoration + Border.all。
+                  // Border.all 在圆角处要重新计算半径，配合非整数宽度（0.9）
+                  // 在不同 DPI 下会画得上下左右粗细不一 —— 就是"输入框不对称"。
+                  // Material 的 shape 描边由框架统一绘制，圆角处始终均匀。
+                  decoration: ShapeDecoration(
                     color: s.surface,
-                    borderRadius: BorderRadius.circular(21),
-                    border: Border.all(color: s.border, width: 0.9),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.card),
+                      side: BorderSide(color: s.border, width: 1),
+                    ),
                   ),
+                  // 单行时高度锁到 46，和两侧按钮（46）一致 ——
+                  // 否则输入框约 48、按钮 46，配 CrossAxisAlignment.end
+                  // 看起来就是"两个按钮没对齐"。
+                  constraints: const BoxConstraints(minHeight: 46),
+                  alignment: Alignment.centerLeft,
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
+                      const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
                   child: TextField(
                     controller: _input,
                     minLines: 1,
@@ -1013,8 +1108,8 @@ class _ChatPageState extends State<ChatPage> {
                   ? GlassIconButton(
                       icon: Icons.stop_rounded,
                       tooltip: '停止',
-                      size: 42,
-                      iconSize: 21,
+                      size: 46,
+                      iconSize: 22,
                       onTap: _stop,
                     )
                   : _sendButton(hasContent),
@@ -1044,7 +1139,7 @@ class _ChatPageState extends State<ChatPage> {
                   height: 66,
                   decoration: BoxDecoration(
                     color: s.surface,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadius.code),
                     border: Border.all(color: s.border, width: 0.9),
                   ),
                   clipBehavior: Clip.antiAlias,
@@ -1064,7 +1159,7 @@ class _ChatPageState extends State<ChatPage> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: <Widget>[
-                              const Icon(Icons.public_rounded,
+                              Icon(Icons.public_rounded,
                                   size: 17, color: AppColors.accent),
                               const SizedBox(height: 4),
                               Text(
@@ -1127,24 +1222,28 @@ class _ChatPageState extends State<ChatPage> {
 
   Widget _sendButton(bool hasContent) {
     final AppSurface s = AppSurface.of(context);
+    final ColorScheme c = Theme.of(context).colorScheme;
     return Material(
-      color: hasContent ? AppColors.accent : s.surface,
+      // 用 M3 颜色角色而不是写死的常量 —— 换主题色时它要跟着变
+      color: hasContent ? c.primary : s.surface,
       shape: CircleBorder(
         side: BorderSide(
           color: hasContent ? Colors.transparent : s.border,
-          width: 0.9,
+          width: 1,
         ),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: hasContent ? _send : null,
         child: SizedBox(
-          width: 42,
-          height: 42,
+          // 必须和左侧「+」按钮、以及输入框最小高度一致（都是 46），
+          // 否则 CrossAxisAlignment.end 下两个按钮看起来是错位的。
+          width: 46,
+          height: 46,
           child: Icon(
             Icons.arrow_upward_rounded,
-            size: 21,
-            color: hasContent ? Colors.white : s.muted,
+            size: 22,
+            color: hasContent ? c.onPrimary : s.muted,
           ),
         ),
       ),

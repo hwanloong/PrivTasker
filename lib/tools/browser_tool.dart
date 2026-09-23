@@ -190,12 +190,24 @@ class BrowserTool extends AgentTool {
         ? args.str('engine').trim()
         : (ctx.searchEngine.trim().isEmpty ? 'bing' : ctx.searchEngine.trim());
 
-    // 优先用指定引擎，取不到就依次换其它的。
-    // 不同引擎在不同网络下的可用性差别很大，硬绑一个很容易全军覆没。
+    // 引擎顺序：**百度优先**，然后才是用户指定的那个，最后是其余。
+    //
+    // 为什么把百度提到最前：国内网络下 Bing 和 Google 要么连不上，
+    // 要么对老旧的系统 WebView 返回「请升级浏览器」页面 —— 抓不到结果，
+    // 却要**等满 15 秒超时**才换下一个。而每换一个引擎都要重建一次
+    // Chromium 实例（又是十几秒）。
+    //
+    // 结果就是：每次搜索先白等二十多秒才轮到真正能用的那个。
+    // 百度是国内站点，不受墙影响，对 WebView 版本也最宽容 ——
+    // 它才是这台机器上最可能立刻成功的一条。
     final SearchEngine primary = SearchEngine.byId(preferred);
+    final SearchEngine first = SearchEngine.byId('baidu');
     final List<SearchEngine> order = <SearchEngine>[
+      if (first.id != primary.id) first,
       primary,
-      ...SearchEngine.all.where((SearchEngine e) => e.id != primary.id),
+      ...SearchEngine.all.where(
+        (SearchEngine e) => e.id != primary.id && e.id != first.id,
+      ),
     ];
 
     final int limit = args.intVal('limit', fallback: 6).clamp(1, 15);

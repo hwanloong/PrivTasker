@@ -1,8 +1,12 @@
 name: dsh_agent
-description: "DSH Agent — 手机上的 AI agent，通过 Shizuku 调用系统能力"
+description: "PrivTasker — 手机上的 AI agent：Shizuku 系统能力 + 内嵌 Python + 笔记任务"
 publish_to: 'none'
 
-version: 1.0.0+1
+# 2.0.0 —— 相对 1.0.0 是能力层面的换代，不是修补：
+# 内嵌 CPython、Termux 连接、笔记与任务、导入导出、Material You 主题。
+# +20 是 versionCode：Android 用它判断"哪个更新"，**必须单调递增**，
+# 所以不能跟着 versionName 一起重置成 1。
+version: 2.0.0+20
 
 environment:
   sdk: ^3.13.3
