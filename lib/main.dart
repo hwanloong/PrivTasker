@@ -109,6 +109,12 @@ class AgentApp extends StatelessWidget {
       animation: settings,
       builder: (BuildContext context, Widget? _) {
         final Color seed = Color(settings.seedColor);
+
+        // 字体方案和字号必须在**构建主题之前**写进 AppFonts ——
+        // 主题里的 textTheme 会读它，晚一步就还是旧字体。
+        AppFonts.applyScheme(settings.fontScheme);
+        AppFonts.userScale = settings.fontScale;
+
         return MaterialApp(
           title: 'PrivTasker',
           debugShowCheckedModeBanner: false,

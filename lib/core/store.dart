@@ -114,6 +114,13 @@ class Settings extends ChangeNotifier {
   /// 所以自己存 32 位 ARGB 更可靠。
   int seedColor = 0xFF4F7DF3;
 
+  /// 字体方案：serif（Times+宋体）/ sans（系统无衬线）/ mono（等宽）
+  String fontScheme = 'serif';
+
+  /// 字号额外放大倍数（1.0 ~ 1.4）。
+  /// 主题的基础倍率是 1.15，最终倍率 = 1.15 × 这个值。
+  double fontScale = 1.0;
+
   void _read() {
     apiKey = _prefs.getString('apiKey') ?? '';
     baseUrl = _prefs.getString('baseUrl') ?? 'https://api.deepseek.com';
@@ -132,6 +139,8 @@ class Settings extends ChangeNotifier {
     autoApproveSafe = _prefs.getBool('autoApproveSafe') ?? true;
     useOverlayConfirm = _prefs.getBool('useOverlayConfirm') ?? true;
     seedColor = _prefs.getInt('seedColor') ?? 0xFF4F7DF3;
+    fontScheme = _prefs.getString('fontScheme') ?? 'serif';
+    fontScale = _prefs.getDouble('fontScale') ?? 1.0;
   }
 
   Future<void> update(void Function() mutate) async {
@@ -155,6 +164,8 @@ class Settings extends ChangeNotifier {
     await _prefs.setBool('autoApproveSafe', autoApproveSafe);
     await _prefs.setBool('useOverlayConfirm', useOverlayConfirm);
     await _prefs.setInt('seedColor', seedColor);
+    await _prefs.setString('fontScheme', fontScheme);
+    await _prefs.setDouble('fontScale', fontScale);
   }
 
   bool get configured => apiKey.trim().isNotEmpty;

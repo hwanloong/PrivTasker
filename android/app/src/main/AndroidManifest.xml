@@ -28,6 +28,14 @@
     <!-- 长任务前台服务（批量 shell、录屏） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Android 14+ 要求声明**具体类型**，且权限名要和 service 的
+         android:foregroundServiceType 对应。dataSync 适合"正在进行的数据处理"。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+
+    <!-- 忽略电池优化。前台服务挡得住内存回收，但**挡不住 Doze** ——
+         打盹模式下 CPU 会挂起、网络会断。跑长任务时这两者互补，缺一不可。
+         这是特殊权限，需要在设置里单独申请（会跳到系统弹窗）。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <!-- 系统级悬浮窗确认框。
          工具很容易把别的应用切到前台（am start、拉起设置页等），
@@ -75,6 +83,15 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- agent 后台执行时的常驻服务。
+             exported=false：只有本应用能启动它。
+             stopWithTask=false：用户划掉最近任务列表时不销毁服务 ——
+             长任务不该因为"划一下"就中断。 -->
+        <service
+            android:name=".AgentService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false"/>
     </application>
 
     <queries>

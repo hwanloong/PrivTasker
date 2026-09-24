@@ -1,5 +1,7 @@
 package com.dsh.dsh_agent
 
+import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
@@ -19,10 +21,14 @@ class MainActivity : FlutterActivity() {
 
         /** 内嵌 Python 通道 */
         const val PYTHON_CHANNEL = "dsh/python"
+
+        /** 后台保活通道（前台服务 + 电池优化） */
+        const val BG_CHANNEL = "dsh/bg"
     }
 
     private var bridge: ShizukuBridge? = null
     private var overlay: OverlayConfirm? = null
+    private var activity: ActivityOverlay? = null
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -44,6 +50,12 @@ class MainActivity : FlutterActivity() {
         val ov = OverlayConfirm(applicationContext)
         overlay = ov
 
+        // 底部的"正在干什么"浮窗。和确认框是两个独立窗口，
+        // 但都用 TYPE_APPLICATION_OVERLAY —— 同时显示会互相盖住，
+        // 所以弹确认框前先把它收起来（见下面的 showConfirm）。
+        val act = ActivityOverlay(applicationContext)
+        activity = act
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OVERLAY_CHANNEL)
             .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
                 when (call.method) {
@@ -52,6 +64,52 @@ class MainActivity : FlutterActivity() {
                     "requestPermission" -> {
                         ov.requestPermission()
                         result.success(true)
+                    }
+
+                    // ---- 进度浮窗 ----
+                    // 显示时机由 Dart 侧决定（应用切到后台时才显示），
+                    // 原生这边只管画。
+                    "showActivity" -> {
+                        act.show(call.argument<String>("text") ?: "正在工作…")
+                        result.success(true)
+                    }
+
+                    "updateActivity" -> {
+                        act.show(call.argument<String>("text") ?: "正在工作…")
+                        result.success(true)
+                    }
+
+                    "hideActivity" -> {
+                        act.hide()
+                        result.success(true)
+                    }
+
+                    "dismissActivity" -> {
+                        act.dismiss()
+                        result.success(true)
+                    }
+
+                    // 把应用拉回前台。
+                    //
+                    // 后台启动 Activity 在 Android 10+ 是被限制的，但我们
+                    // **两个条件都满足**：有正在运行的前台服务，且持有
+                    // SYSTEM_ALERT_WINDOW 权限。所以这里能成功。
+                    //
+                    // REORDER_TO_FRONT 而不是 CLEAR_TOP：前者保留已有的
+                    // Activity 状态，用户回来时还停在原来的滚动位置和输入内容上。
+                    "bringToFront" -> {
+                        try {
+                            val i = Intent(this, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            }
+                            startActivity(i)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            // 被系统拦下就算了 —— 还有通知可以点，
+                            // 不能因为拉不起来就报错给用户
+                            result.success(false)
+                        }
                     }
 
                     "showConfirm" -> {
@@ -64,10 +122,20 @@ class MainActivity : FlutterActivity() {
                         // MethodChannel.Result 必须且只能回一次，
                         // 悬浮窗的超时自动拒绝也走这条路径，所以这里加个闸。
                         var replied = false
+
+                        // 确认框和进度浮窗都用 TYPE_APPLICATION_OVERLAY，
+                        // 同时显示会互相遮住。确认框是**要用户立刻操作**的，
+                        // 优先级更高，所以先把浮窗收起来；用户答完再放回来
+                        // （act.hide 只收起、记住状态，不是销毁）。
+                        act.hide()
+
                         ov.show(title, command, reasons, dangerous) { approved ->
                             main.post {
                                 if (!replied) {
                                     replied = true
+                                    // 答完把浮窗放回来 —— 底层任务还在跑，
+                                    // 用户仍然需要看到"在干什么"
+                                    act.hide()
                                     result.success(approved)
                                 }
                             }
@@ -175,6 +243,85 @@ class MainActivity : FlutterActivity() {
                     main.post { result.success(out) }
                 }.start()
             }
+
+        // ---------------------------------------------------------- 后台保活
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BG_CHANNEL)
+            .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
+                when (call.method) {
+                    // 有没有"忽略电池优化"。false 时 Doze 会掐掉长任务
+                    "batteryIgnored" -> result.success(isIgnoringBattery())
+
+                    // 弹系统对话框申请。这是特殊权限，只能跳系统 UI 让用户点
+                    "requestBattery" -> {
+                        var ok = false
+                        try {
+                            val i = Intent(
+                                android.provider.Settings
+                                    .ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                            )
+                            i.data = android.net.Uri.parse("package:$packageName")
+                            startActivity(i)
+                            ok = true
+                        } catch (e: Exception) {
+                            // 个别 ROM 没有这个 Activity，退回"电池优化列表"页
+                            try {
+                                startActivity(
+                                    Intent(
+                                        android.provider.Settings
+                                            .ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+                                    )
+                                )
+                                ok = true
+                            } catch (e2: Exception) {
+                                ok = false
+                            }
+                        }
+                        result.success(ok)
+                    }
+
+                    // 通知权限（Android 13+）。被拒时前台服务**仍会运行**，
+                    // 只是通知不显示 —— 所以这是锦上添花，不是必需。
+                    "notifEnabled" -> {
+                        val ok = if (Build.VERSION.SDK_INT >= 33) {
+                            checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
+                                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                        } else true
+                        result.success(ok)
+                    }
+
+                    "startService" -> {
+                        val text = call.argument<String>("text") ?: "正在执行任务…"
+                        AgentService.start(applicationContext, text)
+                        result.success(true)
+                    }
+
+                    "updateService" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        if (text.isNotEmpty()) {
+                            AgentService.update(applicationContext, text)
+                        }
+                        result.success(true)
+                    }
+
+                    "stopService" -> {
+                        AgentService.stop(applicationContext)
+                        result.success(true)
+                    }
+
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /** 有没有被加入"电池优化白名单" */
+    private fun isIgnoringBattery(): Boolean {
+        return try {
+            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } catch (e: Exception) {
+            // 个别 ROM 上这个 API 会抛，保守地当作"没加白名单"
+            false
+        }
     }
 
     /** 极简的 JSON 字符串转义 —— 只用于把异常信息塞进结果里 */
@@ -196,6 +343,8 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         overlay?.dismiss()
         overlay = null
+        activity?.dismiss()
+        activity = null
         bridge?.dispose()
         bridge = null
         super.onDestroy()

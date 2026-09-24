@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../ai/agent.dart';
+import '../core/background.dart';
 import '../core/metrics.dart';
 import '../core/models.dart';
 import '../core/overlay.dart';
@@ -57,7 +58,7 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
 
@@ -80,6 +81,9 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    // 观察生命周期：进度浮窗只在**应用不在前台**时显示。
+    // 前台时界面本身就有进度（工具卡片、转圈），再压一个浮窗是纯噪音。
+    WidgetsBinding.instance.addObserver(this);
     widget.settings.addListener(_onExternalChange);
     widget.conversations.addListener(_onExternalChange);
     widget.plugins.addListener(_onExternalChange);
@@ -97,6 +101,10 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // 离开页面时一定要收掉浮窗 —— 否则它会一直挂在屏幕上，
+    // 而且再也没人能关掉它（那个 State 已经销毁了）
+    OverlayService.dismissActivity();
     widget.settings.removeListener(_onExternalChange);
     widget.conversations.removeListener(_onExternalChange);
     widget.plugins.removeListener(_onExternalChange);
@@ -119,6 +127,44 @@ class _ChatPageState extends State<ChatPage> {
 
   void _onExternalChange() {
     if (mounted) setState(() {});
+  }
+
+  /// 最近一次的"正在干什么"文案。
+  /// 切到后台时要立刻显示浮窗，那时得有个已知的文案可用，
+  /// 不能等下一次 onUpdate（可能还要几秒）。
+  String _lastActivity = '正在工作…';
+
+  /// 应用是否在前台。
+  ///
+  /// 浮窗的显示条件就是它 —— **应用内绝不显示浮窗**：
+  /// 界面上本来就有进度（工具卡片、转圈），再压一个浮窗是纯视觉噪音。
+  bool _appInForeground = true;
+
+  /// 应用前后台切换。
+  ///
+  /// ⚠️ **判断必须只看 paused / hidden，不能用 `state == resumed`。**
+  ///
+  /// `AppLifecycleState` 有五档，中间那个 `inactive` 很容易被忽略：
+  /// 拉下通知栏、弹系统对话框、权限提示、分屏 —— 这些都会进 `inactive`，
+  /// **而应用仍然可见**。把 `!resumed` 当后台，就会出现
+  /// "拉一下通知栏，浮窗冒出来了"。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+
+    final bool background = state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden;
+
+    _appInForeground = !background;
+
+    if (background && _busy) {
+      // 真的切出去了且正在干活 → 才显示浮窗
+      OverlayService.showActivity(_lastActivity);
+    } else if (!background) {
+      // resumed 和 inactive 都收起 —— inactive 时应用还看得见，
+      // 界面上的进度已经够了
+      OverlayService.hideActivity();
+    }
   }
 
   Conversation get _conv {
@@ -377,6 +423,394 @@ class _ChatPageState extends State<ChatPage> {
     return result;
   }
 
+  /// 思考深度的中文名。放在这里而不是模型层 —— 它是纯展示用的措辞，
+  /// 和存储的值（low/high/max）分开，改文案不用动数据。
+  static String _effortLabel(String effort) => switch (effort) {
+        'low' => '浅（快）',
+        'high' => '深（默认）',
+        'max' => '最深（慢）',
+        _ => effort,
+      };
+
+  /// 把「思考深度」映射成滑条的 0~3 档。
+  ///
+  /// 用户要的是**一根滑条**，而后端只有 low/high/max 三个值 ——
+  /// 所以中间做一次映射，而不是把三档硬塞成三个按钮。
+  /// 0 = 关闭，1/2/3 = 浅/深/最深。
+  static int _effortSliderValue(Settings set) {
+    if (!set.thinkingEnabled) return 0;
+    return switch (set.reasoningEffort) {
+      'low' => 1,
+      'max' => 3,
+      _ => 2,
+    };
+  }
+
+  /// 滑条档位 → 存进设置的措辞
+  static String _effortSliderLabel(Settings set) =>
+      switch (_effortSliderValue(set)) {
+        0 => '关闭',
+        1 => '浅',
+        2 => '深',
+        _ => '最深',
+      };
+
+  static const List<String> _effortNames = <String>[
+    '关闭',
+    '浅（快）',
+    '深（默认）',
+    '最深（慢）',
+  ];
+
+  /// 对话参数面板：思考深度 / 温度 / 工具轮数。
+  ///
+  /// 合成一个面板而不是三个入口 —— 它们是同一类东西（"这轮对话怎么跑"），
+  /// 而且用户调整时往往是连着调几个。
+  Future<void> _showParamSheet() async {
+    final AppSurface s = AppSurface.of(context);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, StateSetter setSheet) {
+          final Settings set = widget.settings;
+          final int effort = _effortSliderValue(set);
+
+          void save(void Function() mutate) {
+            set.update(mutate);
+            setSheet(() {});
+            setState(() {}); // 让「+」菜单的描述也跟着更新
+          }
+
+          return Container(
+            decoration: BoxDecoration(
+              color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border(top: BorderSide(color: s.border, width: 0.8)),
+            ),
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: s.border,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '对话参数',
+                  style: AppFonts.body(
+                    size: 17,
+                    weight: FontWeight.w700,
+                    color: s.text,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // ---- 思考深度 ----
+                _paramRow(s, '思考深度', _effortNames[effort]),
+                Slider(
+                  value: effort.toDouble(),
+                  min: 0,
+                  max: 3,
+                  divisions: 3,
+                  label: _effortNames[effort],
+                  onChanged: (double v) {
+                    final int idx = v.round();
+                    save(() {
+                      if (idx == 0) {
+                        set.thinkingEnabled = false;
+                      } else {
+                        set.thinkingEnabled = true;
+                        set.reasoningEffort =
+                            <String>['low', 'low', 'high', 'max'][idx];
+                      }
+                    });
+                  },
+                ),
+                _paramHint(
+                  s,
+                  '先"想"再答，质量更好但更慢、更费 token。',
+                ),
+
+                const SizedBox(height: 14),
+
+                // ---- 温度 ----
+                _paramRow(s, '温度', set.temperature.toStringAsFixed(1)),
+                Slider(
+                  value: set.temperature.clamp(0.0, 2.0),
+                  min: 0,
+                  max: 2,
+                  divisions: 20,
+                  label: set.temperature.toStringAsFixed(1),
+                  onChanged: (double v) =>
+                      save(() => set.temperature = v),
+                ),
+                _paramHint(
+                  s,
+                  '越低越稳定保守，越高越发散有创意。'
+                  // 这条必须说清楚，否则用户会觉得"调了没用"
+                  '⚠️ **思考模式开启时这个值不生效** —— '
+                  '官方说明"设置不报错但也不生效"，想要它起作用先把思考深度调到关闭。',
+                ),
+
+                const SizedBox(height: 14),
+
+                // ---- 工具调用轮数 ----
+                _paramRow(s, '工具调用上限', '${set.maxToolRounds} 轮'),
+                Slider(
+                  value: set.maxToolRounds.toDouble().clamp(1, 100),
+                  min: 1,
+                  max: 100,
+                  divisions: 99,
+                  label: '${set.maxToolRounds}',
+                  onChanged: (double v) =>
+                      save(() => set.maxToolRounds = v.round()),
+                ),
+                // 滑杆在 1~100 这个跨度上不好精确点，所以补两个微调按钮。
+                // 想要 37 这种具体值时光靠滑杆会调不准。
+                Row(
+                  children: <Widget>[
+                    _stepButton(s, '−', () {
+                      if (set.maxToolRounds > 1) {
+                        save(() => set.maxToolRounds = set.maxToolRounds - 1);
+                      }
+                    }),
+                    const SizedBox(width: 8),
+                    _stepButton(s, '＋', () {
+                      if (set.maxToolRounds < 100) {
+                        save(() => set.maxToolRounds = set.maxToolRounds + 1);
+                      }
+                    }),
+                    const Spacer(),
+                    _stepButton(s, '常用', () {
+                      save(() => set.maxToolRounds = 8);
+                    }),
+                  ],
+                ),
+                _paramHint(
+                  s,
+                  '一轮 = 模型调一次工具。复杂任务（多步搜索、写代码再调试）需要更多轮；'
+                  '调太小会让它做一半就停。默认 8 轮，上限 100。',
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _paramRow(AppSurface s, String label, String value) {    return Row(
+      children: <Widget>[
+        Text(label, style: AppFonts.body(size: 13.5, color: s.text)),
+        const Spacer(),
+        Text(value,
+            style: AppFonts.code(size: 12.5, color: AppColors.accent)),
+      ],
+    );
+  }
+
+  /// 参数面板里的微调按钮。
+  ///
+  /// 1~100 的跨度上，滑杆很难精确点到某个值（想要 37 时手指一滑就 40 了），
+  /// 所以补 ± 按钮。
+  Widget _stepButton(AppSurface s, String label, VoidCallback onTap) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        decoration: ShapeDecoration(
+          color: s.codeBg,
+          shape: const StadiumBorder(),
+        ),
+        child: Text(
+          label,
+          style: AppFonts.body(
+            size: 13.5,
+            weight: FontWeight.w600,
+            color: s.text,
+            height: 1.2,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _paramHint(AppSurface s, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        text,
+        style: AppFonts.body(size: 11, color: s.muted, height: 1.55),
+      ),
+    );
+  }
+
+  /// 选模型。
+  ///
+  /// 只列当前 DeepSeek 在售的型号 —— `deepseek-chat` / `deepseek-reasoner`
+  /// 那两个旧名已经废弃，列出来只会让人选错。
+  Future<void> _pickModel() async {
+    const List<(String, String)> presets = <(String, String)>[
+      ('deepseek-flash', 'V4.1 Flash · 1M 上下文 · 支持视觉'),
+      ('deepseek-v4-pro', 'V4 Pro · 推理更强 · 不支持图片'),
+    ];
+
+    final String? picked = await _pickSheet(
+      title: '选择模型',
+      current: widget.settings.model,
+      options: presets,
+      note: '模型会影响回答质量和速度。图片理解只在支持视觉的模型上可用。',
+    );
+    if (picked != null) {
+      await widget.settings.update(() => widget.settings.model = picked);
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// 选思考深度。
+  Future<void> _pickThinking() async {
+    final List<(String, String)> presets = <(String, String)>[
+      ('__off__', '关闭思考 · 最快，适合简单问答'),
+      ('low', '浅 · 快，适合改文字、查东西'),
+      ('high', '深 · 默认，日常够用'),
+      ('max', '最深 · 慢，适合复杂推理和写代码'),
+    ];
+
+    final String current =
+        widget.settings.thinkingEnabled ? widget.settings.reasoningEffort : '__off__';
+
+    final String? picked = await _pickSheet(
+      title: '思考深度',
+      current: current,
+      options: presets,
+      note: '思考模式会先"想"再答，质量更好但更慢、更费 token。'
+          '关闭后温度等采样参数才会生效。',
+    );
+    if (picked == null) return;
+
+    await widget.settings.update(() {
+      if (picked == '__off__') {
+        widget.settings.thinkingEnabled = false;
+      } else {
+        widget.settings.thinkingEnabled = true;
+        widget.settings.reasoningEffort = picked;
+      }
+    });
+    if (mounted) setState(() {});
+  }
+
+  /// 通用的单选面板。模型和思考深度共用 —— 两个面板长得一模一样，
+  /// 各写一遍迟早会不一致。
+  Future<String?> _pickSheet({
+    required String title,
+    required String current,
+    required List<(String, String)> options,
+    String? note,
+  }) {
+    final AppSurface s = AppSurface.of(context);
+
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) => Container(
+        decoration: BoxDecoration(
+          color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(top: BorderSide(color: s.border, width: 0.8)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const SizedBox(height: 10),
+              Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: s.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                style: AppFonts.body(
+                  size: 16,
+                  weight: FontWeight.w700,
+                  color: s.text,
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 10),
+              ...options.map(((String, String) o) {
+                final bool active = o.$1 == current;
+                return InkWell(
+                  onTap: () => Navigator.of(ctx).pop(o.$1),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                o.$1 == '__off__' ? o.$2.split(' · ').first : o.$1,
+                                style: AppFonts.code(
+                                  size: 13,
+                                  color: active ? AppColors.accent : s.text,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                o.$1 == '__off__'
+                                    ? o.$2.split(' · ').skip(1).join(' · ')
+                                    : o.$2,
+                                style: AppFonts.body(
+                                    size: 11.5, color: s.muted, height: 1.4),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (active)
+                          Icon(Icons.check_circle_rounded,
+                              size: 19, color: AppColors.accent),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              if (note != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 18),
+                  child: Text(
+                    note,
+                    style: AppFonts.body(size: 11.5, color: s.muted, height: 1.55),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showAttachMenu() {
     final AppSurface s = AppSurface.of(context);
     showModalBottomSheet<void>(
@@ -403,6 +837,39 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ),
               const SizedBox(height: 14),
+
+              // ---- 会话控制（和"附件"是不同类别，所以放最上面并分隔开）----
+              //
+              // 模型和思考深度是**调一次就会影响整轮对话**的东西，
+              // 放在设置里要翻好几层；而它们的调整时机恰恰是"发消息前"，
+              // 也就是用户手指正停在「+」上的时候。
+              _attachOption(
+                s,
+                icon: Icons.memory_rounded,
+                label: '模型',
+                desc: widget.settings.model,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickModel();
+                },
+              ),
+              _attachOption(
+                s,
+                icon: Icons.tune_rounded,
+                label: '对话参数',
+                desc: '思考深度 ${_effortSliderLabel(widget.settings)} · '
+                    '温度 ${widget.settings.temperature.toStringAsFixed(1)} · '
+                    '最多 ${widget.settings.maxToolRounds} 轮工具',
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showParamSheet();
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
+                child: Divider(color: s.border, height: 1),
+              ),
+
               _attachOption(
                 s,
                 icon: Icons.photo_library_outlined,
@@ -541,6 +1008,10 @@ class _ChatPageState extends State<ChatPage> {
     );
     _runner = runner;
 
+    // 开始后台保活。**agent 一开始跑就挂上**，而不是等它变慢才挂 ——
+    // 因为进程被回收往往发生在任务中途，那时候再挂已经晚了。
+    await BackgroundService.instance.start('正在思考…');
+
     try {
       await runner.run(
         conversation: conv,
@@ -549,6 +1020,9 @@ class _ChatPageState extends State<ChatPage> {
           setState(() {});
           _scrollToEnd();
           widget.conversations.save();
+          // 通知和悬浮窗都要显示"现在在干什么" ——
+          // 状态就在消息对象里（哪个工具是 running），不用改 agent 循环
+          _syncAgentActivity(conv);
         },
         onConfirm: (ToolInvocation inv) async {
           if (!mounted) return false;
@@ -594,7 +1068,64 @@ class _ChatPageState extends State<ChatPage> {
         widget.conversations.touch(conv);
       }
       _runner = null;
+      // 任务结束就撤掉前台服务和浮窗 —— 常驻通知不该在我们已经不干活时
+      // 还挂着，浮窗更是没人会去关它。放在 finally 里，报错和中止也会走到。
+      await BackgroundService.instance.stop();
+      await OverlayService.dismissActivity();
+
+      // **干完了就把用户带回来。**
+      // 他切出去等结果，完成时不该还需要自己想起来切回来看看。
+      //
+      // 只在应用不在前台时拉 —— 已经在前台还 startActivity 是多余的，
+      // 而且可能打断用户正在做的事。
+      if (!_appInForeground) {
+        await OverlayService.bringToFront();
+      }
     }
+  }
+
+  /// 从会话的最后一个工具调用里读出"现在在干什么"，同步给通知和悬浮窗。
+  ///
+  /// 数据来源是 `ToolInvocation.status` —— agent 循环会把它置成 running/success，
+  /// 所以**不需要给 AgentRunner 加回调**，读现成的状态就够了。
+  void _syncAgentActivity(Conversation conv) {
+    if (conv.messages.isEmpty) return;
+
+    final ChatMessage last = conv.messages.last;
+    final List<ToolInvocation> tools = last.tools;
+
+    // 找正在跑的那个
+    for (final ToolInvocation inv in tools.reversed) {
+      if (inv.status == InvocationStatus.running) {
+        final AgentTool? t = _buildRegistry().byName(inv.name);
+        final String label = t?.title ?? inv.name;
+        final String detail = inv.args['command']?.toString() ??
+            inv.args['query']?.toString() ??
+            inv.args['path']?.toString() ??
+            '';
+        final String text = detail.isEmpty
+            ? '正在执行：$label'
+            : '正在执行：$label · ${detail.length > 40 ? '${detail.substring(0, 40)}…' : detail}';
+        _pushActivity(text);
+        return;
+      }
+    }
+
+    // 没有正在跑的工具 —— 说明在等模型
+    _pushActivity('正在思考…');
+  }
+
+  /// 把"现在在干什么"同时推给**通知**和**浮窗**。
+  ///
+  /// 两个地方用同一份文案 —— 分开维护迟早会出现"通知说在搜索、
+  /// 浮窗说在写代码"这种自相矛盾。
+  void _pushActivity(String text) {
+    _lastActivity = text;
+    BackgroundService.instance.update(text);
+    // 浮窗只在后台显示，但这里不判断前后台 ——
+    // 原生侧会记住状态：没显示时 update 只是更新文案，
+    // 等切到后台时会用最新的文案显示出来
+    OverlayService.updateActivity(text);
   }
 
   void _stop() {
@@ -722,20 +1253,25 @@ class _ChatPageState extends State<ChatPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Text(
-                  'PrivTasker',
+                // 品牌名用**渐变文字**（方案取自定义图标同一条蓝紫渐变），
+                // 所以头部和图标是同一套配色。
+                GradientText(
+                  text: 'PrivTasker',
                   style: AppFonts.body(
-                    size: 20,
+                    size: 21,
                     weight: FontWeight.w700,
-                    color: s.text,
+                    // 这里的颜色不生效（会被 ShaderMask 的渐变盖掉），
+                    // 但必须给一个不透明的值 —— 用半透明会让渐变整体变淡
+                    color: Colors.black,
                     height: 1.2,
                   ),
                 ),
                 const SizedBox(height: 2),
+                // 副标题改成**当前聊天名称** ——
+                // 原来那行是"模型名 · 工具已启用"，那是状态信息不是身份信息；
+                // 而多会话场景下，用户最需要一眼确认的是"我在哪个对话里"。
                 Text(
-                  widget.settings.configured
-                      ? '${widget.settings.model} · 工具已启用'
-                      : '未配置 API Key',
+                  _conv.title.trim().isEmpty ? '新对话' : _conv.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppFonts.body(size: 11.5, color: s.muted, height: 1.25),

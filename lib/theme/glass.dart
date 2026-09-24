@@ -4,6 +4,100 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 
+/// 品牌名：**带渐变填充的文字**。
+///
+/// 用 `ShaderMask` 把渐变当"颜料"刷在文字上，而不是给文字加一块渐变背景 ——
+/// 后者会变成一个色块，和"文字本身是渐变的"观感完全不同。
+///
+/// 渐变取自 app 图标的同一条（蓝 → 紫），所以头部和图标是同一套配色。
+class GradientText extends StatelessWidget {
+  const GradientText({
+    super.key,
+    required this.text,
+    required this.style,
+    this.colors = const <Color>[
+      Color(0xFF6E9BFF),
+      Color(0xFF5B7CF6),
+      Color(0xFF8B5CF6),
+    ],
+  });
+
+  final String text;
+  final TextStyle style;
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return ShaderMask(
+      // srcIn：只保留文字笔画范围内的渐变，其余透明
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (Rect bounds) => LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        colors: colors,
+      ).createShader(bounds),
+      child: Text(text, style: style),
+    );
+  }
+}
+
+/// 品牌标记：一个**不带背景的勾**。
+///
+/// 用自绘而不是 `Icons.check_rounded`：Material 那个勾的笔画比例是固定的，
+/// 和 app 图标的笔形不一致；自绘才能让头部和图标看起来是同一个标记。
+class CheckLogo extends StatelessWidget {
+  const CheckLogo({
+    super.key,
+    required this.color,
+    this.size = 20,
+    this.strokeRatio = 0.17,
+  });
+
+  final Color color;
+  final double size;
+
+  /// 笔画粗细占边长的比例。app 图标上是 0.17 左右。
+  final double strokeRatio;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(painter: _CheckPainter(color, strokeRatio)),
+    );
+  }
+}
+
+class _CheckPainter extends CustomPainter {
+  const _CheckPainter(this.color, this.strokeRatio);
+
+  final Color color;
+  final double strokeRatio;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint p = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      // 粗笔画 + 圆头圆角 —— 这是 app 图标上的笔形
+      ..strokeWidth = size.width * strokeRatio
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final Path path = Path()
+      ..moveTo(size.width * 0.12, size.height * 0.54)
+      ..lineTo(size.width * 0.40, size.height * 0.82)
+      ..lineTo(size.width * 0.92, size.height * 0.18);
+
+    canvas.drawPath(path, p);
+  }
+
+  @override
+  bool shouldRepaint(_CheckPainter old) =>
+      old.color != color || old.strokeRatio != strokeRatio;
+}
+
 // ============================================================ 圆角：连续曲率
 
 /// iOS 那种「连续曲率」圆角路径（俗称 squircle）。

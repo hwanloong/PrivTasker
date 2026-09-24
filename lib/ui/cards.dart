@@ -554,6 +554,20 @@ class _CardWebViewState extends State<CardWebView> {
                             encoding: 'utf-8',
                           ),
                           initialSettings: InAppWebViewSettings(
+                            // ---- 关键：关掉混合合成 ----
+                            //
+                            // 默认为 true 时，WebView 由系统渲染成**独立图层、
+                            // 盖在 Flutter 场景之上**，于是三件事同时发生：
+                            //   · BackdropFilter 模糊不到它（不在同一图层）
+                            //   · 它会盖住顶部/底部的栏
+                            //   · 被 ClipPath/ClipRRect 裁剪会渲染成空白
+                            //
+                            // 关掉后 WebView 渲染进 Flutter 场景（虚拟显示），
+                            // 三个问题一起解决。
+                            // 代价是**卡片内的触摸交互可能失效** —— 但卡片本来就
+                            // 设计成"看为主"，要交互点开全屏（全屏页保持默认的
+                            // 混合合成，那边交互正常）。
+                            useHybridComposition: false,
                             // ---- 沙箱：能画东西，但碰不到应用 ----
                             // 不开 JS 桥（不调 addJavaScriptHandler）——
                             // 这是最关键的一条：卡片无法回调到 Dart 侧。

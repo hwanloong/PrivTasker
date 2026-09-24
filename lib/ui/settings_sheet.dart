@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/background.dart';
 import '../core/overlay.dart';
 import '../core/productivity.dart';
 import '../core/rules.dart';
@@ -90,6 +91,13 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   @override
   void initState() {
     super.initState();
+
+    // 探测后台保活状态（有没有加入电池优化白名单）。
+    // 不 await：它是异步的系统查询，不该拖慢设置页打开。
+    BackgroundService.instance.refresh().then((_) {
+      if (mounted) setState(() {});
+    });
+
     final Settings s = widget.settings;
     _apiKey = TextEditingController(text: s.apiKey);
     _baseUrl = TextEditingController(text: s.baseUrl);
@@ -175,6 +183,113 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       _selfHostedOk = err == null;
       _selfHostedStatus = err == null ? '连接正常' : '连接失败：$err';
     });
+  }
+
+  /// 字体方案 + 字号。
+  ///
+  /// 三个方案**都不依赖额外字体文件**：前两个用已打包的 Times/宋体，
+  /// 第三个用 Android 系统自带的族名（Flutter 会映射到系统字体，
+  /// 不需要在 pubspec 里声明）。所以切换**不增加 APK 体积**。
+  Widget _fontOptions(AppSurface s) {
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            '字体',
+            style: AppFonts.body(
+              size: 13,
+              weight: FontWeight.w600,
+              color: s.text,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // ---- 方案 ----
+          for (final (String, String, String) scheme in AppFonts.schemes)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppRadius.code),
+                onTap: () => widget.settings.update(
+                  () => widget.settings.fontScheme = scheme.$1,
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              scheme.$2,
+                              style: AppFonts.body(
+                                size: 13.5,
+                                weight: FontWeight.w600,
+                                color: widget.settings.fontScheme == scheme.$1
+                                    ? AppColors.accent
+                                    : s.text,
+                                height: 1.3,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              scheme.$3,
+                              style: AppFonts.body(
+                                  size: 11.5, color: s.muted, height: 1.4),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (widget.settings.fontScheme == scheme.$1)
+                        Icon(Icons.check_circle_rounded,
+                            size: 18, color: AppColors.accent),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 10),
+          Divider(color: s.border, height: 1),
+          const SizedBox(height: 12),
+
+          // ---- 字号 ----
+          Row(
+            children: <Widget>[
+              Text('字号', style: AppFonts.body(size: 13, color: s.text)),
+              const Spacer(),
+              // 显示**最终**倍率而不是滑杆值 ——
+              // 用户关心的是"实际多大"，不是"我调了多少"（那还得自己乘 1.15）
+              Text(
+                '${(AppFonts.baseScale * widget.settings.fontScale * 100).round()}%',
+                style: AppFonts.code(size: 12, color: AppColors.accent),
+              ),
+            ],
+          ),
+          Slider(
+            value: widget.settings.fontScale,
+            min: 0.85,
+            max: 1.4,
+            divisions: 11,
+            label:
+                '${(AppFonts.baseScale * widget.settings.fontScale * 100).round()}%',
+            onChanged: (double v) =>
+                widget.settings.update(() => widget.settings.fontScale = v),
+          ),
+          Text(
+            '所有文字（正文、代码块、表格）会一起缩放。'
+            '刻意不用系统的字体大小设置 —— markdown 走 RichText，'
+            '它不响应那个设置，会导致正文放大而代码块没放大。',
+            style: AppFonts.body(size: 11, color: s.muted, height: 1.5),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 主题色选择器。
@@ -280,6 +395,84 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               ),
             ),
             Icon(Icons.chevron_right_rounded, size: 20, color: s.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 后台保活：前台服务 + 电池优化白名单。
+  ///
+  /// 两件事放一张卡里，因为它们是**互补**的：
+  /// 前台服务挡内存回收，白名单挡 Doze 挂起 CPU。
+  /// 分开说用户会以为做一件就够了。
+  Widget _bgCard(AppSurface s) {
+    final BgStatus st = BackgroundService.instance.status;
+    final bool ok = st.batteryIgnored;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: SurfaceCard(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  ok ? Icons.battery_saver_rounded : Icons.battery_alert_outlined,
+                  size: 18,
+                  color: ok ? AppColors.success : AppColors.warning,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    '后台保活',
+                    style: AppFonts.body(
+                      size: 14,
+                      weight: FontWeight.w600,
+                      color: s.text,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+                Text(
+                  ok ? '已加入白名单' : '未加入',
+                  style: AppFonts.body(
+                    size: 12,
+                    color: ok ? AppColors.success : AppColors.warning,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              // 说清"两件事"和"仍不保证"，否则用户会以为开了就一定跑完
+              '前台服务挡得住内存回收，但挡不住 Doze（打盹时挂起 CPU、断网），'
+              '所以还需要把它加入电池优化白名单。\n\n'
+              '⚠️ 部分国产 ROM 有更激进的省电策略，做这两件事**显著提高**长任务存活率，'
+              '但不保证一定跑完 —— 所以长任务（编译等）仍建议把输出写进日志文件，'
+              '之后回来读，而不是挂着干等。',
+              style: AppFonts.body(size: 11.5, color: s.muted, height: 1.6),
+            ),
+            if (!ok) ...<Widget>[
+              const SizedBox(height: 10),
+              GlassButton(
+                label: '去申请（跳系统弹窗）',
+                icon: Icons.open_in_new_rounded,
+                fontSize: 12.5,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                onTap: () async {
+                  await BackgroundService.instance.requestBattery();
+                  // 用户可能在系统弹窗里操作完才回来，延迟一点再刷新，
+                  // 免得刚跳过去就查、拿到还是旧状态
+                  await Future<void>.delayed(const Duration(seconds: 1));
+                  await BackgroundService.instance.refresh();
+                  if (mounted) setState(() {});
+                },
+              ),
+            ],
           ],
         ),
       ),
@@ -400,6 +593,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 children: <Widget>[
                   _section(s, '外观'),
                   _colorPicker(s),
+                  const SizedBox(height: 12),
+                  _fontOptions(s),
 
                   _section(s, '接口与模型'),
                   _field(
@@ -567,6 +762,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   ),
 
                   _section(s, '安全'),
+                  _bgCard(s),
                   _switchRow(
                     s,
                     label: '只读命令自动执行',

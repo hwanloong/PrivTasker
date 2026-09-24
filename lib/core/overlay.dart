@@ -58,4 +58,68 @@ class OverlayService {
       return false;
     }
   }
+
+  // ------------------------------------------------------ 进度浮窗
+
+  /// 显示底部的"正在干什么"浮窗。
+  ///
+  /// **只在应用不在前台时调用。** 前台时界面本身就有进度
+  /// （工具卡片、转圈），再压一个浮窗是纯视觉噪音。
+  /// 所以显示时机由调用方根据生命周期决定，而不是这里判断。
+  static Future<void> showActivity(String text) async {
+    try {
+      await _channel.invokeMethod<bool>(
+        'showActivity',
+        <String, dynamic>{'text': text},
+      );
+    } catch (_) {
+      // 浮窗是锦上添花，加不上也不该影响 agent 干活
+    }
+  }
+
+  /// 更新浮窗文案
+  static Future<void> updateActivity(String text) async {
+    try {
+      await _channel.invokeMethod<bool>(
+        'updateActivity',
+        <String, dynamic>{'text': text},
+      );
+    } catch (_) {
+      // 忽略
+    }
+  }
+
+  /// 收起浮窗（记住状态，之后还能再显示）
+  static Future<void> hideActivity() async {
+    try {
+      await _channel.invokeMethod<bool>('hideActivity');
+    } catch (_) {
+      // 忽略
+    }
+  }
+
+  /// 彻底关掉浮窗（任务结束时用）
+  static Future<void> dismissActivity() async {
+    try {
+      await _channel.invokeMethod<bool>('dismissActivity');
+    } catch (_) {
+      // 忽略
+    }
+  }
+
+  /// 把应用拉回前台。
+  ///
+  /// 用在"agent 干完了"的时候：用户切出去等结果，完成了就把他带回来，
+  /// 而不是让他自己想起来切回来看看。
+  ///
+  /// 后台启动 Activity 在 Android 10+ 受限，但我们同时有前台服务和
+  /// 悬浮窗权限，所以是允许的。被系统拦下时静默失败 ——
+  /// 还有通知可以点，不该因此报错给用户。
+  static Future<bool> bringToFront() async {
+    try {
+      return await _channel.invokeMethod<bool>('bringToFront') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

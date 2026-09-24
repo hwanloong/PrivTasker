@@ -70,10 +70,15 @@ class NotesTool extends AgentTool {
   @override
   String get description =>
       '读写用户的笔记。action 取值：'
-      'list（列出全部）、search（按关键词搜索）、read（读一条的完整内容）、'
-      'create（新建）、update（修改）、delete（删除）。'
+      'list（列出全部，含文件夹结构）、search（按关键词搜索）、'
+      'read（读一条的完整内容）、create（新建）、update（修改）、delete（删除）、'
+      'folder（新建/重命名/删除文件夹）。\n'
       '用户说「记一下」「存个笔记」时用 create；'
-      '说「我之前记过什么关于 X 的」时用 search。';
+      '说「我之前记过什么关于 X 的」时用 search。\n'
+      '**笔记可以放进文件夹**：list 会列出所有文件夹和它们的 id；'
+      'create 时给 folder_id 就把新笔记放进那个文件夹，'
+      '不给就落在「未归类」。**不要把笔记硬塞进文件夹** —— '
+      '未归类是正常状态，只在这条内容确实属于某个已有文件夹时才指定。';
 
   @override
   Map<String, dynamic> get parameters => <String, dynamic>{
@@ -81,7 +86,15 @@ class NotesTool extends AgentTool {
         'properties': <String, dynamic>{
           'action': <String, dynamic>{
             'type': 'string',
-            'enum': <String>['list', 'search', 'read', 'create', 'update', 'delete'],
+            'enum': <String>[
+              'list',
+              'search',
+              'read',
+              'create',
+              'update',
+              'delete',
+              'folder',
+            ],
           },
           'id': <String, dynamic>{
             'type': 'string',
@@ -98,14 +111,41 @@ class NotesTool extends AgentTool {
             'items': <String, dynamic>{'type': 'string'},
             'description': '标签',
           },
+          'folder_id': <String, dynamic>{
+            'type': 'string',
+            'description': 'create / update 时把笔记放进哪个文件夹'
+                '（用 list 结果里的文件夹 id）。留空或传 "" 表示移出到「未归类」。',
+          },
+          'folder_action': <String, dynamic>{
+            'type': 'string',
+            'enum': <String>['create', 'rename', 'delete'],
+            'description': 'action=folder 时的子操作',
+          },
+          'folder_name': <String, dynamic>{
+            'type': 'string',
+            'description': 'action=folder 且 folder_action=create/rename 时的文件夹名',
+          },
         },
         'required': <String>['action'],
       };
 
   @override
   RiskAssessment riskFor(Map<String, dynamic> args) {
-    if (args.str('action') == 'delete') {
+    final String a = args.str('action');
+    if (a == 'delete') {
       return RiskAssessment(RiskLevel.caution, <String>['删除笔记，删除后无法恢复']);
+    }
+    if (a == 'folder') {
+      final String fa = args.str('folder_action');
+      if (fa == 'delete') {
+        return RiskAssessment(RiskLevel.caution, <String>[
+          '删除文件夹。**里面的笔记不会被删除**，它们会变成「未归类」',
+        ]);
+      }
+      return RiskAssessment(
+        RiskLevel.caution,
+        <String>['${fa == 'rename' ? '重命名' : '新建'}文件夹：${args.str('folder_name')}'],
+      );
     }
     return RiskAssessment.safe;
   }
@@ -113,9 +153,15 @@ class NotesTool extends AgentTool {
   @override
   String summarize(Map<String, dynamic> args) {
     final String a = args.str('action');
-    if (a == 'create') return '新建笔记：${args.str('title')}';
+    if (a == 'create') {
+      final String f = args.str('folder_id');
+      return '新建笔记：${args.str('title')}${f.isEmpty ? '' : '（放进文件夹 $f）'}';
+    }
     if (a == 'search') return '搜索笔记：${args.str('keyword')}';
     if (a == 'list') return '列出笔记';
+    if (a == 'folder') {
+      return '${args.str('folder_action')} 文件夹 ${args.str('folder_name')}';
+    }
     return '$a 笔记 ${args.str('id')}';
   }
 
@@ -127,20 +173,43 @@ class NotesTool extends AgentTool {
     switch (action) {
       case 'list':
         if (store.items.isEmpty) return '（还没有任何笔记）';
-        final StringBuffer sb = StringBuffer('共 ${store.items.length} 条：\n');
-        for (final Note n in store.sorted) {
-          sb.writeln('- [${n.id}] ${n.title}'
-              '${n.tags.isEmpty ? '' : '  #${n.tags.join(' #')}'}'
-              '  （更新于 ${_fmt(n.updatedAt)}）');
+        final StringBuffer sb = StringBuffer();
+
+        // 先列文件夹 —— 模型需要知道 id 才能把笔记放进去
+        if (store.folders.isNotEmpty) {
+          sb.writeln('文件夹（${store.folders.length} 个）：');
+          for (final NoteFolder f in store.folders) {
+            sb.writeln('- [${f.id}] ${f.name}'
+                '（${store.countInFolder(f.id)} 条）');
+          }
+          sb.writeln();
+        }
+        sb.writeln('未归类 ${store.unfiledCount} 条：');
+        // 只列未归类的 —— 归了类的在上面文件夹那栏，重复列会让模型
+        // 以为有两条不同的笔记
+        final List<Note> unfiled =
+            store.items.where((Note n) => n.folderId == null).toList();
+        if (unfiled.isEmpty) {
+          sb.writeln('（没有）');
+        } else {
+          for (final Note n in unfiled) {
+            sb.writeln('- [${n.id}] ${n.title}'
+                '${n.tags.isEmpty ? '' : '  #${n.tags.join(' #')}'}'
+                '  （更新于 ${_fmt(n.updatedAt)}）');
+          }
         }
         return clampOutput(sb.toString());
 
       case 'search':
+        // 搜索**跨文件夹** —— 用户问"我之前记过什么关于 X 的"，
+        // 不会希望因为那条在某个文件夹里就搜不到
         final List<Note> hit = store.search(args.str('keyword'));
         if (hit.isEmpty) return '没有匹配的笔记。';
         final StringBuffer sb = StringBuffer('命中 ${hit.length} 条：\n');
         for (final Note n in hit) {
-          sb.writeln('--- [${n.id}] ${n.title}');
+          final NoteFolder? f = store.folderById(n.folderId);
+          sb.writeln('--- [${n.id}] ${n.title}'
+              '${f == null ? '' : '  📁${f.name}'}');
           // 带一段正文摘要，模型往往不用再读一次全文
           final String body = n.body.trim();
           if (body.isNotEmpty) {
@@ -152,7 +221,9 @@ class NotesTool extends AgentTool {
       case 'read':
         final Note? n = store.byId(args.str('id'));
         if (n == null) return '找不到 id 为「${args.str('id')}」的笔记。';
+        final NoteFolder? f = store.folderById(n.folderId);
         return '标题：${n.title}\n'
+            '文件夹：${f?.name ?? '未归类'}\n'
             '标签：${n.tags.isEmpty ? '无' : n.tags.join('、')}\n'
             '更新：${_fmt(n.updatedAt)}\n\n'
             '${clampOutput(n.body, max: 8000)}';
@@ -160,14 +231,32 @@ class NotesTool extends AgentTool {
       case 'create':
         final String title = args.str('title');
         if (title.trim().isEmpty) return '错误：缺少 title';
+
+        // 指定的文件夹必须真的存在 —— 否则会创建一个指向不存在文件夹的笔记，
+        // 那条笔记在界面上永远不会出现在任何地方（既不在文件夹里，
+        // 也不在"未归类"里），等于凭空消失
+        final String wanted = args.str('folder_id').trim();
+        String? folderId;
+        if (wanted.isNotEmpty) {
+          if (store.folderById(wanted) == null) {
+            return '错误：找不到文件夹「$wanted」。'
+                '请先用 action=list 看现有文件夹，或省略 folder_id 让它落在「未归类」。';
+          }
+          folderId = wanted;
+        }
+
         final Note n = store.create(
           title: title,
           body: args.str('body'),
           tags: ((args['tags'] as List<dynamic>?) ?? <dynamic>[])
               .map((dynamic e) => e.toString())
               .toList(),
-        );
-        return '已创建笔记 [${n.id}] ${n.title}';
+        )..folderId = folderId;
+        store.saveQuietly();
+
+        final NoteFolder? nf = store.folderById(folderId);
+        return '已创建笔记 [${n.id}] ${n.title}'
+            '（位置：${nf?.name ?? '未归类'}）';
 
       case 'update':
         final Note? n = store.byId(args.str('id'));
@@ -179,8 +268,21 @@ class NotesTool extends AgentTool {
               .map((dynamic e) => e.toString())
               .toList();
         }
+        // folder_id 传空串 = 移出到未归类；不传 = 不动
+        if (args.containsKey('folder_id')) {
+          final String w = args.str('folder_id').trim();
+          if (w.isEmpty) {
+            n.folderId = null;
+          } else if (store.folderById(w) == null) {
+            return '错误：找不到文件夹「$w」，笔记的文件夹没有改动。';
+          } else {
+            n.folderId = w;
+          }
+        }
         store.touch(n);
-        return '已更新笔记 [${n.id}] ${n.title}';
+        final NoteFolder? uf = store.folderById(n.folderId);
+        return '已更新笔记 [${n.id}] ${n.title}'
+            '（位置：${uf?.name ?? '未归类'}）';
 
       case 'delete':
         final Note? n = store.byId(args.str('id'));
@@ -189,8 +291,45 @@ class NotesTool extends AgentTool {
         store.remove(n.id);
         return '已删除笔记「$t」';
 
+      case 'folder':
+        return _folderAction(store, args);
+
       default:
         return '错误：未知 action「$action」';
+    }
+  }
+
+  /// 文件夹的增删改
+  String _folderAction(NoteStore store, Map<String, dynamic> args) {
+    final String fa = args.str('folder_action').trim();
+    final String name = args.str('folder_name').trim();
+    final String id = args.str('id').trim();
+
+    switch (fa) {
+      case 'create':
+        if (name.isEmpty) return '错误：缺少 folder_name';
+        final NoteFolder f = store.createFolder(name);
+        return '已创建文件夹 [${f.id}] ${f.name}';
+
+      case 'rename':
+        final NoteFolder? f = store.folderById(id);
+        if (f == null) return '找不到 id 为「$id」的文件夹。';
+        if (name.isEmpty) return '错误：缺少 folder_name';
+        store.renameFolder(f, name);
+        return '已重命名文件夹为「$name」';
+
+      case 'delete':
+        final NoteFolder? f = store.folderById(id);
+        if (f == null) return '找不到 id 为「$id」的文件夹。';
+        final int n = store.countInFolder(id);
+        final String fname = f.name;
+        store.deleteFolder(id);
+        // 明确说明笔记没被删 —— 模型需要知道，用户更需要知道
+        return '已删除文件夹「$fname」。'
+            '里面的 $n 条笔记**没有被删除**，它们变成了「未归类」。';
+
+      default:
+        return '错误：folder_action 取值应为 create / rename / delete';
     }
   }
 }

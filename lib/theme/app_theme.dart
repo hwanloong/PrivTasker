@@ -10,26 +10,80 @@ import 'package:flutter/services.dart';
 class AppFonts {
   const AppFonts._();
 
-  static const String latin = 'TimesNewRoman';
-  static const String cjk = 'SimSun';
-  static const String mono = 'Consolas';
+  // ---- 字体方案（可在设置里切换，所以不是 const）----
 
-  /// 全局字号缩放系数。
-  ///
-  /// 想整体调大/调小字号**只改这一个数**：所有文字都经过 [body] / [code]
-  /// 产出，在这里乘一次就全覆盖了。
+  /// 正文字体族
+  static String latin = 'TimesNewRoman';
+
+  /// 中文兜底族
+  static String cjk = 'SimSun';
+
+  /// 等宽字体族
+  static String mono = 'Consolas';
+
+  /// 用户额外放大的倍数（设置里的滑杆）
+  static double userScale = 1.0;
+
+  /// 基础缩放 —— 这是"整体字号"的基准值。
+  /// 最终倍率 = [baseScale] × [userScale]。
   ///
   /// 为什么不用 `MediaQuery.textScaler`：markdown 渲染走的是 `RichText`，
   /// 它**不会**响应 textScaler，结果是正文放大了、代码块和表格没放大，
-  /// 排版反而更乱。在这里统一乘就没这个问题。
-  static const double scale = 1.15;
+  /// 排版反而更乱。在字体工厂里乘一次就没这个问题。
+  static const double baseScale = 1.15;
 
-  /// Times 没有中文字形，由宋体兜底；最后再兜一层系统 serif。
-  static const List<String> bodyFallback = <String>[cjk, 'serif'];
+  /// 最终倍率
+  static double get scale => baseScale * userScale;
 
-  /// 代码样式：Consolas 打头，兜底等宽。刻意**不**回退到宋体，
-  /// 否则代码里出现中文注释时字体会突然跳变成宋体，很难看。
-  static const List<String> monoFallback = <String>[mono, 'monospace'];
+  /// 正文回退链
+  static List<String> bodyFallback = <String>[cjk, 'serif'];
+
+  /// 代码回退链。刻意**不**回退到宋体 ——
+  /// 否则代码里的中文注释会突然跳成宋体，很难看。
+  static List<String> monoFallback = <String>['Consolas', 'monospace'];
+
+  /// 可选的字体方案。
+  ///
+  /// 三个都**不依赖额外字体文件**：
+  /// 前两个用已打包的 Times/宋体，第三个用 Android 系统自带的
+  /// `sans-serif` / `monospace` 族名（Flutter 会映射到系统字体，
+  /// 不需要在 pubspec 里声明）。
+  /// 所以换方案**不增加 APK 体积**。
+  static const List<(String, String, String)> schemes = <(String, String, String)>[
+    ('serif', '衬线（Times + 宋体）', '当前的默认方案，适合长文阅读'),
+    ('sans', '系统无衬线', '安卓默认观感，界面更紧凑'),
+    ('mono', '等宽', '所有文字等宽，适合看代码和数据'),
+  ];
+
+  /// 应用某个字体方案。由主题构建时调用。
+  static void applyScheme(String scheme) {
+    switch (scheme) {
+      case 'sans':
+        latin = 'sans-serif';
+        cjk = 'sans-serif';
+        bodyFallback = <String>['sans-serif'];
+        mono = 'monospace';
+        monoFallback = <String>['monospace'];
+        break;
+
+      case 'mono':
+        latin = 'monospace';
+        cjk = 'monospace';
+        bodyFallback = <String>['monospace'];
+        mono = 'Consolas';
+        monoFallback = <String>['Consolas', 'monospace'];
+        break;
+
+      case 'serif':
+      default:
+        latin = 'TimesNewRoman';
+        cjk = 'SimSun';
+        bodyFallback = <String>['SimSun', 'serif'];
+        mono = 'Consolas';
+        monoFallback = <String>['Consolas', 'monospace'];
+        break;
+    }
+  }
 
   /// 正文 TextStyle 的统一构造：英文 Times、中文宋体。
   static TextStyle body({

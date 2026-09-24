@@ -18,6 +18,7 @@ class NoteEditorPage extends StatefulWidget {
     required this.store,
     this.note,
     this.onOpenLink,
+    this.initialFolderId,
   });
 
   final NoteStore store;
@@ -26,6 +27,10 @@ class NoteEditorPage extends StatefulWidget {
   final Note? note;
 
   final void Function(String url)? onOpenLink;
+
+  /// 新建时的默认文件夹。用户在某个文件夹里点「+」，新笔记就该落在那儿 ——
+  /// 否则他得建完再手动移一次。
+  final String? initialFolderId;
 
   @override
   State<NoteEditorPage> createState() => _NoteEditorPageState();
@@ -39,6 +44,9 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
   late bool _isMarkdown;
   bool _preview = false;
 
+  /// 当前所属文件夹。null = 未归类。
+  late String? _folderId;
+
   /// 有没有实际改动过。没改就不写入、不刷新 updatedAt ——
   /// 否则"点开看一眼再返回"也会把这篇文章的修改时间改掉。
   bool _dirty = false;
@@ -51,6 +59,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
     _body = TextEditingController(text: n?.body ?? '');
     _tags = TextEditingController(text: n?.tags.join(' ') ?? '');
     _isMarkdown = n?.isMarkdown ?? false;
+    _folderId = n?.folderId ?? widget.initialFolderId;
 
     _title.addListener(_markDirty);
     _body.addListener(_markDirty);
@@ -81,11 +90,14 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
     if (existing == null) {
       // 全空的新笔记不落盘 —— 避免"点进来又退出"留下一堆空笔记
       if (_title.text.trim().isEmpty && _body.text.trim().isEmpty) return;
-      widget.store.create(
-        title: _title.text,
-        body: _body.text,
-        tags: tagList,
-      ).isMarkdown = _isMarkdown;
+      widget.store
+          .create(
+            title: _title.text,
+            body: _body.text,
+            tags: tagList,
+          )
+        ..isMarkdown = _isMarkdown
+        ..folderId = _folderId;
       widget.store.saveQuietly();
     } else {
       existing.title =
@@ -303,7 +315,155 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
             hintStyle: AppFonts.code(size: 12.5, color: s.muted),
           ),
         ),
+
+        const SizedBox(height: 18),
+        // ---- 所属文件夹 ----
+        Text(
+          '文件夹',
+          style: AppFonts.body(size: 12, color: s.muted, height: 1.3),
+        ),
+        const SizedBox(height: 6),
+        _folderRow(s),
       ],
+    );
+  }
+
+  /// 文件夹选择行。点开一个单选面板。
+  ///
+  /// **「未归类」是一个正经选项**，不是"没选" ——
+  /// 未归类是长期存在的正常状态，用户需要能主动把笔记放回去。
+  Widget _folderRow(AppSurface s) {
+    final NoteFolder? cur = widget.store.folderById(_folderId);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _pickFolder,
+      child: Container(
+        decoration: ShapeDecoration(
+          color: s.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.field),
+            side: BorderSide(color: s.border, width: 1),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              cur == null ? Icons.inbox_outlined : Icons.folder_rounded,
+              size: 16,
+              color: cur == null ? s.muted : AppColors.accent,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                cur?.name ?? '未归类',
+                style: AppFonts.body(size: 13.5, color: s.text, height: 1.3),
+              ),
+            ),
+            Icon(Icons.unfold_more_rounded, size: 17, color: s.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickFolder() async {
+    final List<NoteFolder> folders = widget.store.folders;
+
+    final String? picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) {
+        final AppSurface s = AppSurface.of(ctx);
+        return Container(
+          decoration: BoxDecoration(
+            color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border(top: BorderSide(color: s.border, width: 0.8)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const SizedBox(height: 14),
+                Text(
+                  '放到哪个文件夹',
+                  style: AppFonts.body(
+                    size: 16,
+                    weight: FontWeight.w700,
+                    color: s.text,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _folderOption(ctx, s, null, '未归类', _folderId == null),
+                for (final NoteFolder f in folders)
+                  _folderOption(ctx, s, f.id, f.name, _folderId == f.id),
+                if (folders.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+                    child: Text(
+                      '还没有文件夹。回笔记页点右上角的文件夹图标可以新建。',
+                      style:
+                          AppFonts.body(size: 12, color: s.muted, height: 1.5),
+                    ),
+                  )
+                else
+                  const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (picked == null) return;
+    setState(() {
+      // 用哨兵值区分"取消（null）"和"选了未归类（__none__）" ——
+      // 不区分的话用户永远选不中"未归类"
+      _folderId = picked == '__none__' ? null : picked;
+      _dirty = true;
+    });
+  }
+
+  Widget _folderOption(
+    BuildContext ctx,
+    AppSurface s,
+    String? id,
+    String name,
+    bool active,
+  ) {
+    return InkWell(
+      onTap: () => Navigator.of(ctx).pop(id ?? '__none__'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              id == null ? Icons.inbox_outlined : Icons.folder_rounded,
+              size: 17,
+              color: active ? AppColors.accent : s.muted,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                name,
+                style: AppFonts.body(
+                  size: 14,
+                  weight: active ? FontWeight.w600 : FontWeight.w400,
+                  color: active ? AppColors.accent : s.text,
+                  height: 1.3,
+                ),
+              ),
+            ),
+            if (active)
+              Icon(Icons.check_rounded,
+                  size: 18, color: AppColors.accent),
+          ],
+        ),
+      ),
     );
   }
 
