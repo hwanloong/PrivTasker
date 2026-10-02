@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="104" alt="PrivTasker 图标">
+
 </p>
 
 # PrivTasker
