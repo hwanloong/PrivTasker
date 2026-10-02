@@ -245,7 +245,7 @@ class _NotesPageState extends State<NotesPage> {
                       '未归类 ${widget.store.unfiledCount} 条',
                       style: AppFonts.body(
                         size: 12.5,
-                        weight: FontWeight.w700,
+                        weight: FontWeight.w600,
                         color: s.muted,
                         height: 1.2,
                         letterSpacing: 0.3,
@@ -360,16 +360,9 @@ class _NotesPageState extends State<NotesPage> {
 
     final String? action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Colors.transparent,
       builder: (BuildContext ctx) {
         final AppSurface s = AppSurface.of(ctx);
-        return Container(
-          decoration: BoxDecoration(
-            color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border(top: BorderSide(color: s.border, width: 0.8)),
-          ),
-          child: SafeArea(
+        return SafeArea(
             top: false,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -379,7 +372,7 @@ class _NotesPageState extends State<NotesPage> {
                   f.name,
                   style: AppFonts.body(
                     size: 16,
-                    weight: FontWeight.w700,
+                    weight: FontWeight.w600,
                     color: s.text,
                     height: 1.2,
                   ),
@@ -405,7 +398,6 @@ class _NotesPageState extends State<NotesPage> {
                 const SizedBox(height: 10),
               ],
             ),
-          ),
         );
       },
     );
@@ -426,8 +418,8 @@ class _NotesPageState extends State<NotesPage> {
         builder: (BuildContext ctx) => AlertDialog(
           title: Text('删除文件夹',
               style:
-                  AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3)),
-          content: Text(
+                  AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3)),
+          content: mdText(
             '「${f.name}」将被删除。\n\n'
             '里面的 $n 条笔记**不会被删除**，它们会变成「未归类」，'
             '仍然可以在根级看到。',
@@ -469,7 +461,7 @@ class _NotesPageState extends State<NotesPage> {
         return AlertDialog(
           title: Text(title,
               style:
-                  AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3)),
+                  AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3)),
           content: Container(
             decoration: ShapeDecoration(
               color: s.surface,
@@ -538,7 +530,7 @@ class _NotesPageState extends State<NotesPage> {
               label,
               style: AppFonts.body(
                 size: 12.5,
-                weight: active ? FontWeight.w700 : FontWeight.w500,
+                weight: active ? FontWeight.w600 : FontWeight.w500,
                 color: fg,
                 height: 1.2,
               ),
@@ -774,7 +766,7 @@ class _TasksPageState extends State<TasksPage> {
         text,
         style: AppFonts.body(
           size: 12.5,
-          weight: FontWeight.w700,
+          weight: FontWeight.w600,
           color: s.muted,
           height: 1.2,
           letterSpacing: 0.3,
@@ -881,7 +873,6 @@ class _TasksPageState extends State<TasksPage> {
     final String? action = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
       builder: (BuildContext ctx) => StatefulBuilder(
         builder: (BuildContext ctx, StateSetter setSheet) {
           Future<void> pickDue() async {
@@ -916,12 +907,6 @@ class _TasksPageState extends State<TasksPage> {
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(ctx).size.height * 0.85,
               ),
-              decoration: BoxDecoration(
-                color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(24)),
-                border: Border(top: BorderSide(color: s.border, width: 0.8)),
-              ),
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -933,7 +918,7 @@ class _TasksPageState extends State<TasksPage> {
                           existing == null ? '新建任务' : '编辑任务',
                           style: AppFonts.body(
                             size: 17,
-                            weight: FontWeight.w700,
+                            weight: FontWeight.w600,
                             color: s.text,
                             height: 1.2,
                           ),

@@ -1,127 +1,71 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 
 import 'app_theme.dart';
 
-/// 品牌名：**带渐变填充的文字**。
-///
-/// 用 `ShaderMask` 把渐变当"颜料"刷在文字上，而不是给文字加一块渐变背景 ——
-/// 后者会变成一个色块，和"文字本身是渐变的"观感完全不同。
-///
-/// 渐变取自 app 图标的同一条（蓝 → 紫），所以头部和图标是同一套配色。
-class GradientText extends StatelessWidget {
-  const GradientText({
-    super.key,
-    required this.text,
-    required this.style,
-    this.colors = const <Color>[
-      Color(0xFF6E9BFF),
-      Color(0xFF5B7CF6),
-      Color(0xFF8B5CF6),
-    ],
-  });
+// ============================================================ 行内文本
 
-  final String text;
-  final TextStyle style;
-  final List<Color> colors;
+/// 渲染 `**行内粗体**` 和 `` `行内代码` `` 的 Text。
+///
+/// **为什么需要它**：项目里到处在 UI 文案里写 `**重点**`、`` `命令` ``
+/// （写 markdown 的习惯），但普通 `Text` 不解析 markdown ——
+/// 星号和反引号会**原样显示**出来。界面上出现一堆 `**` 和 `` ` ``，
+/// 看起来就像哪里坏了，而写的人完全不会意识到。
+///
+/// 只处理这两种行内标记，不引完整的 markdown 渲染器：
+/// UI 文案需要的就这两种，而完整解析器会带进块级排版（标题、列表、代码块），
+/// 那些塞在一行提示里只会更乱。真正需要完整 markdown 的地方用 `MarkdownView`。
+///
+/// 注意区分：**给模型看的**工具描述、提示词里的 `**` 是正确的，不要动 ——
+/// 那些文本是发给模型的，它读 markdown。
+Widget mdText(
+  String text, {
+  required TextStyle style,
+  TextAlign? textAlign,
+  int? maxLines,
+  TextOverflow? overflow,
+}) {
+  final RegExp re = RegExp(r'\*\*(.+?)\*\*|`([^`]+)`', dotAll: true);
+  final List<InlineSpan> spans = <InlineSpan>[];
+  int last = 0;
 
-  @override
-  Widget build(BuildContext context) {
-    return ShaderMask(
-      // srcIn：只保留文字笔画范围内的渐变，其余透明
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (Rect bounds) => LinearGradient(
-        begin: Alignment.centerLeft,
-        end: Alignment.centerRight,
-        colors: colors,
-      ).createShader(bounds),
-      child: Text(text, style: style),
-    );
+  for (final RegExpMatch m in re.allMatches(text)) {
+    if (m.start > last) {
+      spans.add(TextSpan(text: text.substring(last, m.start)));
+    }
+
+    final String? bold = m.group(1);
+    if (bold != null) {
+      spans.add(TextSpan(
+        text: bold,
+        // 封顶 w600：本项目的字重约定就是最高 semibold
+        // （见 README 的「字号与字重」）。再粗一档就压过正文了。
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ));
+    } else {
+      // 行内代码：等宽、比正文小一号，**不换颜色** ——
+      // 换了会在灰字提示里突然冒出一块彩色，反而更乱。
+      spans.add(TextSpan(
+        text: m.group(2),
+        style: AppFonts.code(
+          size: (style.fontSize ?? 13) - 1,
+          color: style.color,
+        ),
+      ));
+    }
+    last = m.end;
   }
-}
+  if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
 
-/// 品牌标记：一个**不带背景的勾**。
-///
-/// 用自绘而不是 `Icons.check_rounded`：Material 那个勾的笔画比例是固定的，
-/// 和 app 图标的笔形不一致；自绘才能让头部和图标看起来是同一个标记。
-class CheckLogo extends StatelessWidget {
-  const CheckLogo({
-    super.key,
-    required this.color,
-    this.size = 20,
-    this.strokeRatio = 0.17,
-  });
-
-  final Color color;
-  final double size;
-
-  /// 笔画粗细占边长的比例。app 图标上是 0.17 左右。
-  final double strokeRatio;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CustomPaint(painter: _CheckPainter(color, strokeRatio)),
-    );
-  }
-}
-
-class _CheckPainter extends CustomPainter {
-  const _CheckPainter(this.color, this.strokeRatio);
-
-  final Color color;
-  final double strokeRatio;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint p = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      // 粗笔画 + 圆头圆角 —— 这是 app 图标上的笔形
-      ..strokeWidth = size.width * strokeRatio
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final Path path = Path()
-      ..moveTo(size.width * 0.12, size.height * 0.54)
-      ..lineTo(size.width * 0.40, size.height * 0.82)
-      ..lineTo(size.width * 0.92, size.height * 0.18);
-
-    canvas.drawPath(path, p);
-  }
-
-  @override
-  bool shouldRepaint(_CheckPainter old) =>
-      old.color != color || old.strokeRatio != strokeRatio;
-}
-
-// ============================================================ 圆角：连续曲率
-
-/// iOS 那种「连续曲率」圆角路径（俗称 squircle）。
-///
-/// Flutter 没有原生的 squircle，但 [ContinuousRectangleBorder] 的路径就是
-/// 这个形状 —— 直接复用，不要手写超椭圆公式（很容易画歪）。
-Path squirclePath(Rect rect, double radius) {
-  return ContinuousRectangleBorder(
-    borderRadius: BorderRadius.circular(radius),
-  ).getOuterPath(rect);
-}
-
-/// 用 squircle 裁剪。配合 [BackdropFilter] 或图片圆角用。
-class SquircleClipper extends CustomClipper<Path> {
-  const SquircleClipper(this.radius);
-
-  final double radius;
-
-  @override
-  Path getClip(Size size) => squirclePath(Offset.zero & size, radius);
-
-  @override
-  bool shouldReclip(SquircleClipper oldClipper) =>
-      oldClipper.radius != radius;
+  // 没有标记时退化成普通 Text 的行为（spans 只有一段），不必特判。
+  return Text.rich(
+    TextSpan(style: style, children: spans),
+    textAlign: textAlign,
+    maxLines: maxLines,
+    overflow: overflow,
+  );
 }
 
 // ============================================================ 玻璃核心
@@ -149,35 +93,43 @@ class _GlassLayers {
   final Color onFill;
   final Color shadow;
 
-  /// Material You 的层次靠**色调容器**表达，不靠边框。
+  /// 玻璃/卡片的填色。
   ///
-  /// 这是和 iOS 风格最本质的区别：
-  /// - iOS：白底 + 发丝描边 + 投影
-  /// - M3：无边框，用 `surfaceContainerLow/High/Highest` 的**明度差**分层
+  /// **这里是 iOS 化和 Material You 最本质的分界。**
   ///
-  /// 所以这里不再返回 border —— 卡片没有边框。
+  /// - M3：无边框，用 `surfaceContainerLow/High` 的**明度差**分层，
+  ///   而且这些色调是由种子色推导的 —— 换个主题色，卡片底色偏紫偏绿。
+  /// - iOS：**一套固定的语义色**。浅色下页面是浅灰（#F2F2F7），
+  ///   卡片是**纯白**（#FFFFFF）；深色下页面纯黑，卡片是 #1C1C1E。
+  ///   层次来自"灰底托白卡"这个对比，不来自明度阶梯。
+  ///
+  /// 所以这里整个换成 [AppSurface] 的固定色，只有强调色跟种子走。
   static _GlassLayers of(BuildContext context, GlassRole role) {
-    final ColorScheme c = Theme.of(context).colorScheme;
-    final bool dark = c.brightness == Brightness.dark;
+    final AppSurface s = AppSurface.of(context);
+    final bool dark = s.isDark;
 
     final Color fill = switch (role) {
-      // 卡片：最轻的一档，只比背景略深/略浅
-      GlassRole.card => c.surfaceContainerLow,
-      // 控件：按钮、输入框，比卡片再高一层
-      GlassRole.control => c.surfaceContainerHigh,
-      // 悬浮层：弹窗面板，最高
-      GlassRole.floating => c.surfaceContainerHigh,
+      // 卡片：iOS 的卡片是**纯白**（浅色）/ 二级灰（深色），
+      // 压在浅灰页面底上 —— 对比清清楚楚。
+      GlassRole.card => s.surface,
+      // 控件：按钮、输入框。iOS 的次要按钮是"浅灰填充 + 无边框"，
+      // 用的正是 codeBg 那一档灰（#F2F2F7 / #2C2C2E）。
+      GlassRole.control => s.codeBg,
+      // 悬浮层：面板拖到页面上，仍用卡片白，靠投影浮起来。
+      GlassRole.floating => s.surface,
     };
 
     return _GlassLayers(
       fill: fill,
-      onFill: c.onSurface,
-      // M3 的投影很克制：elevation 1/2 级只有极淡一层
+      onFill: s.text,
+      // iOS 的分组卡片**几乎没有投影** —— 白卡压在灰底上已经足够分层了。
+      // 再叠投影会显得脏，也偏离 iOS 那种"平"的观感。
+      // 只有悬浮层（面板/弹窗）才给一层像样的投影。
       shadow: dark
           ? Colors.black
-              .withValues(alpha: role == GlassRole.floating ? 0.45 : 0.22)
-          : const Color(0xFF101828).withValues(
-              alpha: role == GlassRole.floating ? 0.10 : 0.03,
+              .withValues(alpha: role == GlassRole.floating ? 0.55 : 0.0)
+          : const Color(0xFF000000).withValues(
+              alpha: role == GlassRole.floating ? 0.18 : 0.0,
             ),
     );
   }
@@ -213,34 +165,50 @@ class _GlassBox extends StatelessWidget {
     // StadiumBorder 在正方形上就是正圆，在长方形上是胶囊，正是想要的效果。
     final bool pill = radius >= 100;
 
-    // M3 的卡片**没有边框** —— 靠填色分层。只有在调用方显式给了
-    // borderColor 时才画（比如"已选中"状态、危险操作）。
-    final ShapeBorder shape = pill
-        ? (borderColor == null
-            ? const StadiumBorder()
-            : StadiumBorder(
-                side: BorderSide(color: borderColor!, width: 1.1)))
-        : (borderColor == null
-            ? ContinuousRectangleBorder(
-                borderRadius: BorderRadius.circular(radius),
-              )
-            : ContinuousRectangleBorder(
-                borderRadius: BorderRadius.circular(radius),
-                side: BorderSide(color: borderColor!, width: 1.1),
-              ));
+    // 投影全为 0 时不要挂 BoxShadow —— 空 alpha 的 BoxShadow 仍会
+    // 让 Flutter 走一遍阴影绘制路径（以及每个卡片一个 saveLayer），
+    // 列表里几十张卡片就是白白的开销。
+    final bool hasShadow = g.shadow.a > 0.001;
+
+    // iOS 的卡片用**连续曲率**（squircle）而不是标准圆弧圆角 ——
+    // 这是 iOS 观感里最不容易被说出来、但一眼能看出差别的一处。
+    // 小半径（输入框、标签）用连续曲率反而会显得"没圆到位"，
+    // 所以只在 >= 20 时启用。
+    final ShapeBorder shape;
+    if (pill) {
+      shape = borderColor == null
+          ? const StadiumBorder()
+          : StadiumBorder(side: BorderSide(color: borderColor!, width: 1.1));
+    } else if (radius >= 20) {
+      shape = ContinuousRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+        side: borderColor == null
+            ? BorderSide.none
+            : BorderSide(color: borderColor!, width: 1.1),
+      );
+    } else {
+      shape = RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+        side: borderColor == null
+            ? BorderSide.none
+            : BorderSide(color: borderColor!, width: 1.1),
+      );
+    }
 
     final Widget content = Container(
       decoration: ShapeDecoration(
         shape: shape,
         color: tint ?? g.fill,
-        shadows: <BoxShadow>[
-          BoxShadow(
-            color: g.shadow,
-            blurRadius: role == GlassRole.floating ? 24 : 8,
-            spreadRadius: -4,
-            offset: Offset(0, role == GlassRole.floating ? 8 : 2),
-          ),
-        ],
+        shadows: hasShadow
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: g.shadow,
+                  blurRadius: role == GlassRole.floating ? 30 : 10,
+                  spreadRadius: role == GlassRole.floating ? -2 : 0,
+                  offset: Offset(0, role == GlassRole.floating ? 10 : 2),
+                ),
+              ]
+            : null,
       ),
       child: DefaultTextStyle.merge(
         style: TextStyle(color: g.onFill),
@@ -311,14 +279,17 @@ class GlassBar extends StatelessWidget {
 
 // ============================================================ 玻璃卡片
 
-/// 玻璃卡片。纯白/纯黑背景上的主要容器。
+/// 玻璃卡片。页面底色上的主要容器。
+///
+/// iOS 分组列表的卡片圆角是 10，独立卡片稍大。默认取 [AppRadius.card]（16）——
+/// 之前是 30，那是 M3 那种"大圆角夸张化"的量级，iOS 上几乎看不到这么圆的卡片。
 class SurfaceCard extends StatelessWidget {
   const SurfaceCard({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(14),
     this.margin,
-    this.radius = 30,
+    this.radius = AppRadius.card,
     this.color,
     this.borderColor,
     this.onTap,
@@ -347,9 +318,8 @@ class SurfaceCard extends StatelessWidget {
       padding: margin ?? EdgeInsets.zero,
       child: onTap == null
           ? box
-          : _Pressable(
+          : Pressable(
               onTap: onTap,
-              radius: radius,
               child: box,
             ),
     );
@@ -386,65 +356,99 @@ class GlassButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme c = Theme.of(context).colorScheme;
+    final AppSurface s = AppSurface.of(context);
 
-    // M3 按钮有三种色调角色，这里对应：
-    //   accent  → Filled（primary 填充）      ：主操作
-    //   danger  → Filled（error 填充）        ：破坏性操作
-    //   默认    → FilledTonal（次要容器填充） ：普通操作
-    // 不再用"白色叠透明度"—— 那样换主题色时按钮不会跟着变。
-    final Color bg = accent
-        ? c.primary
-        : danger
-            ? c.error
-            : c.secondaryContainer;
+    // **底色交给玻璃，强调色/危险色改由文字和图标承担。**
+    //
+    // 原来是三档实心底色（蓝 / 红 / 浅灰）。换成真正的液态玻璃之后，
+    // `liquid_glass_widgets` 的按钮**没有对外暴露着色参数**（LiquidGlassSettings
+    // 里没有 tint），所以做不到"蓝色玻璃按钮"。与其自己叠一层色块把玻璃盖住
+    // （那就不是玻璃了），不如把语义交给前景色 —— 这也正是 iOS 26 工具栏按钮
+    // 的做法：一块玻璃 + 着色图标/文字。
+    //
+    // 主次关系仍然清楚：主操作是 prominent（更厚、更不透明），
+    // 次要操作是 filled（更薄、更透）。
     final Color fg = accent
-        ? c.onPrimary
+        ? AppColors.accent
         : danger
-            ? c.onError
-            : c.onSecondaryContainer;
+            ? AppColors.danger
+            : s.text;
 
-    return Opacity(
-      opacity: onTap == null ? 0.45 : 1.0,
-      child: _Pressable(
-        onTap: onTap,
-        radius: 999,
-        child: Container(
-          decoration: ShapeDecoration(
-            shape: const StadiumBorder(),
-            color: bg,
-          ),
-          padding: padding,
-          child: Row(
-            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              if (icon != null) ...<Widget>[
-                Icon(icon, size: fontSize + 3, color: fg),
-                const SizedBox(width: 7),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: AppFonts.body(
-                    size: fontSize,
-                    weight: FontWeight.w600,
-                    color: fg,
-                    height: 1.2,
-                  ),
-                ),
+    final Widget content = Padding(
+      padding: padding,
+      child: Row(
+        mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          if (icon != null) ...<Widget>[
+            Icon(icon, size: fontSize + 3, color: fg),
+            const SizedBox(width: 7),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: AppFonts.body(
+                size: fontSize,
+                // iOS 按钮文字是 semibold 而不是 bold —— 更细更"轻"。
+                weight: FontWeight.w600,
+                color: fg,
+                height: 1.2,
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
+    );
+
+    return lg.GlassButton.custom(
+      onTap: onTap ?? () {},
+      enabled: onTap != null,
+      // 用 `.custom` 这个命名构造，而不是默认那个。
+      //
+      // 默认构造是**给方形图标按钮**用的：`icon` 必填、`width/height` 默认 56、
+      // 而且**根本没有 `child` 参数**（`child` 在默认构造里被写死成 null）。
+      // `.custom` 才是给"文字/复合内容"用的，它的 width/height 默认就是 null，
+      // 于是按钮按内容自适应 —— 这正是文字按钮需要的。
+      width: expand ? double.infinity : null,
+      // ---- 形状：用**具体数值**，不要用哨兵常量 ----
+      //
+      // 这个包的 `shape` 默认值是 `LiquidOval()`，等价于 Flutter 的
+      // `OvalBorder` —— **真正的椭圆**，宽大于高的文字按钮会变成两头尖的。
+      // 所以必须显式给形状。
+      //
+      // 但**不要**用 `GlassDefaults.capsuleRadius`（9999）这个哨兵值：
+      // 包里只有 `GlassSegmentedControl` 和 `GlassTabBar` 会对它做特判
+      // （文档原话是"检测到这个值后直接透传给 shader、不做内缩减法"）。
+      // `GlassButton` 里**一处都没引用** capsuleRadius / effectiveRadius /
+      // safeBorderRadius —— 它把这个半径原样送进 shader 的 SDF uniform，
+      // 一个 9999 的半径会算出退化/畸变的轮廓。
+      //
+      // 23 对现在所有按钮都是胶囊（按钮高度 29~46，Flutter 会把半径夹到
+      // 半高，正好等于 23 或更小），但 shader 拿到的是个正常数字。
+      //
+      // 分段控件那边用哨兵值是**对的** —— 它确实有那个特判。
+      shape: const lg.LiquidRoundedRectangle(
+        borderRadius: AppRadius.input,
+      ),
+      // **一律用 `filled`，不用 `prominent`。**
+      //
+      // 包对 `prominent` 的定义是"更厚的玻璃 + 更低的透明度，让按钮更重"——
+      // 翻成视觉就是**更白的一块**。在深色底上，一个 prominent 玻璃按钮
+      // 就是一块发光的白坨，"很多控件发白"里有它一份。
+      //
+      // 而强调色本来就不该由玻璃底承担：这个包**没有对外暴露玻璃着色参数**，
+      // 所以主次只能靠图标和文字颜色表达 —— 这也正是 iOS 26 工具栏的做法：
+      // 一块玻璃 + 着色图标/文字。用 `prominent` 想加强主次，付出的代价是
+      // 整块变白，得不偿失。
+      style: lg.GlassButtonStyle.filled,
+      child: content,
     );
   }
 }
 
-/// 圆形玻璃图标按钮
+/// 圆形玻璃图标按钮（液态玻璃）
 class GlassIconButton extends StatelessWidget {
   const GlassIconButton({
     super.key,
@@ -466,49 +470,54 @@ class GlassIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppSurface s = AppSurface.of(context);
+    final bool disabled = onTap == null;
 
-    final Widget button = Opacity(
-      opacity: onTap == null ? 0.4 : 1.0,
-      child: _Pressable(
-        onTap: onTap,
-        radius: 999,
-        child: _GlassBox(
-          radius: 999,
-          role: GlassRole.control,
-          padding: EdgeInsets.zero,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Center(
-              child: Icon(icon, size: iconSize, color: color ?? s.text),
-            ),
-          ),
-        ),
-      ),
+    // 注意 `Icon` **显式给了 color 和 size**：
+    // 包的按钮默认从 `IconTheme` 取颜色（CupertinoColors.label）和尺寸，
+    // 而这里的 color 承载了语义（危险操作是红的、禁用是灰的），
+    // 必须由我们说了算，不能被主题盖掉。
+    Widget button = lg.GlassIconButton(
+      icon: Icon(icon, size: iconSize, color: color ?? s.text),
+      // 包的这个按钮**没有 enabled 参数**（只有 GlassButton 有）。
+      // 禁用态只能自己表现：给一个空回调 + 降透明度，
+      // 而不是不传回调 —— 那会变成一个"点了没反应但看着是活的"按钮。
+      onPressed: disabled ? () {} : onTap!,
+      size: size,
+      iconSize: iconSize,
+      semanticLabel: tooltip,
     );
+
+    if (disabled) {
+      button = Opacity(opacity: 0.4, child: button);
+    }
 
     if (tooltip == null) return button;
     return Tooltip(message: tooltip!, child: button);
   }
 }
 
-/// 按压反馈：缩小 + 压暗
-class _Pressable extends StatefulWidget {
-  const _Pressable({
+/// 按压反馈：缩小 + 压暗。
+///
+/// **为什么公开：** 这个应用关掉了 Material 的水波纹（见 `AppTheme` 的
+/// `splashFactory`），因为水波纹是 Material 最强的视觉签名之一。
+/// 代价是任何"自己包一层 GestureDetector"的地方都**完全没有按下反馈**，
+/// 手感是死的。所以凡是需要可点区域、又不想引入 Material 组件的地方，
+/// 都应该用这个包一层 —— 比如对话页顶部那个「点开历史记录」的标题。
+class Pressable extends StatefulWidget {
+  const Pressable({
+    super.key,
     required this.child,
-    required this.radius,
     this.onTap,
   });
 
   final Widget child;
-  final double radius;
   final VoidCallback? onTap;
 
   @override
-  State<_Pressable> createState() => _PressableState();
+  State<Pressable> createState() => _PressableState();
 }
 
-class _PressableState extends State<_Pressable> {
+class _PressableState extends State<Pressable> {
   bool _down = false;
 
   @override
@@ -558,21 +567,23 @@ class GlassChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme c = Theme.of(context).colorScheme;
+    final AppSurface s = AppSurface.of(context);
 
     // 传了 color（风险等级、状态标签）时，底色必须是**该颜色的低透明度版本**。
     // 之前一律用 secondaryContainer，会出现「绿色标签配紫色底」这种错配 ——
     // 语义色和容器色打架，看起来就是"按钮有问题"。
     //
+    // 没传 color 时用 iOS 的中性灰填充（而不是 M3 的 secondaryContainer，
+    // 那是个由种子色推导的色块，一眼就是 Material）。
+    //
     // 用局部变量是因为：实例字段不会参与类型提升，`color.withValues` 会被
     // 判为"可能为 null"。局部变量可以提升。
     final Color? tintColor = color;
-    final bool dark = c.brightness == Brightness.dark;
-    final Color fg = tintColor ?? c.onSecondaryContainer;
+    final Color fg = tintColor ?? AppColors.accent;
     final Color bgFill = background ??
         (tintColor != null
-            ? tintColor.withValues(alpha: dark ? 0.24 : 0.14)
-            : c.secondaryContainer);
+            ? tintColor.withValues(alpha: s.isDark ? 0.26 : 0.15)
+            : s.codeBg);
 
     final Widget chip = Container(
       padding: EdgeInsets.symmetric(

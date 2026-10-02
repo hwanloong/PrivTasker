@@ -266,7 +266,7 @@ class _BrowserPageState extends State<BrowserPage> {
             child: Row(
               children: <Widget>[
                 GlassIconButton(
-                  icon: Icons.arrow_back_rounded,
+                  icon: Icons.arrow_back_ios_new_rounded,
                   tooltip: '后退',
                   size: 36,
                   iconSize: 18,

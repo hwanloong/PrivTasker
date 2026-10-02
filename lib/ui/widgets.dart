@@ -614,7 +614,7 @@ Future<bool> showRiskConfirmDialog(
                 dangerous ? '危险操作确认' : '操作确认',
                 style: AppFonts.body(
                   size: 16.5,
-                  weight: FontWeight.w700,
+                  weight: FontWeight.w600,
                   color: s.text,
                   height: 1.25,
                 ),

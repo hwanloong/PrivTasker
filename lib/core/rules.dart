@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'ids.dart';
+
 /// 一条用户自定义规则：**当 XXX 的时候，就 YYY**。
 ///
 /// 设计上刻意**不做触发器引擎**，而是把规则作为**指令**交给模型。
@@ -64,14 +66,29 @@ class CustomRule {
 class RuleStore extends ChangeNotifier {
   RuleStore._(this._file);
 
-  /// 进程内单例。`configure()` 之前 `rules` 为空，所以即使忘了初始化
-  /// 也只是"没有规则"，不会崩。
-  static late final RuleStore instance;
+  /// 进程内单例。
+  ///
+  /// **和 `MemoryStore` 一样刻意不用 `static late final`** ——
+  /// 那种写法只能赋值一次，第二次 `configure()` 会抛
+  /// `LateInitializationError`，让这个类没法测试，也是一颗定时炸弹。
+  /// 可空 + getter 把"没初始化"变成一句看得懂的报错。
+  static RuleStore? _instance;
+
+  static RuleStore get instance {
+    final RuleStore? s = _instance;
+    if (s == null) {
+      throw StateError(
+        'RuleStore 还没初始化。应该在 main() 里调用 RuleStore.configure()。',
+      );
+    }
+    return s;
+  }
 
   static Future<RuleStore> configure(File file) async {
-    instance = RuleStore._(file);
-    await instance.load();
-    return instance;
+    final RuleStore s = RuleStore._(file);
+    _instance = s;
+    await s.load();
+    return s;
   }
 
   final File _file;
@@ -112,7 +129,7 @@ class RuleStore extends ChangeNotifier {
 
   CustomRule add(String when_, String then_) {
     final CustomRule r = CustomRule(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      id: newId(),
       when_: when_.trim(),
       then_: then_.trim(),
     );

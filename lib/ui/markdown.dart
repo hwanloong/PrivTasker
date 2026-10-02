@@ -135,7 +135,7 @@ class MarkdownView extends StatelessWidget {
                 h.text,
                 AppFonts.body(
                   size: size,
-                  weight: FontWeight.w700,
+                  weight: FontWeight.w600,
                   color: s.text,
                   height: 1.35,
                 ),
@@ -325,7 +325,7 @@ List<InlineSpan> _plainInline(
     if (m.group(2) != null) {
       spans.add(TextSpan(
         text: m.group(2),
-        style: base.copyWith(fontWeight: FontWeight.w700),
+        style: base.copyWith(fontWeight: FontWeight.w600),
       ));
     } else if (m.group(4) != null) {
       spans.add(TextSpan(text: ' ${m.group(4)} ', style: code));
@@ -505,7 +505,7 @@ class _TableView extends StatelessWidget {
     final List<double> widths = _columnWidths();
     final TextStyle headStyle = AppFonts.body(
       size: baseSize - 1.5,
-      weight: FontWeight.w700,
+      weight: FontWeight.w600,
       color: surface.text,
       height: 1.45,
     );

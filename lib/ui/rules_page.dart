@@ -63,7 +63,7 @@ class _RulesPageState extends State<RulesPage> {
       child: Row(
         children: <Widget>[
           GlassIconButton(
-            icon: Icons.arrow_back_rounded,
+            icon: Icons.arrow_back_ios_new_rounded,
             tooltip: '返回',
             size: 38,
             iconSize: 19,
@@ -75,7 +75,7 @@ class _RulesPageState extends State<RulesPage> {
               '自定义规则',
               style: AppFonts.body(
                 size: 17,
-                weight: FontWeight.w700,
+                weight: FontWeight.w600,
                 color: s.text,
                 height: 1.2,
               ),
@@ -111,7 +111,7 @@ class _RulesPageState extends State<RulesPage> {
           ),
         ),
         const SizedBox(height: 8),
-        Text(
+        mdText(
           '规则就是一句话：**当……的时候，就……**\n\n'
           '例如：\n'
           '· 当我问天气时，先用 web 查我所在城市再回答\n'
@@ -223,15 +223,9 @@ class _RulesPageState extends State<RulesPage> {
     final bool? ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
       builder: (BuildContext ctx) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: Container(
-          decoration: BoxDecoration(
-            color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border(top: BorderSide(color: s.border, width: 0.8)),
-          ),
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 22),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -241,7 +235,7 @@ class _RulesPageState extends State<RulesPage> {
                 existing == null ? '新建规则' : '编辑规则',
                 style: AppFonts.body(
                   size: 17,
-                  weight: FontWeight.w700,
+                  weight: FontWeight.w600,
                   color: s.text,
                   height: 1.2,
                 ),
@@ -255,7 +249,7 @@ class _RulesPageState extends State<RulesPage> {
               const SizedBox(height: 6),
               _input(s, thenC, '例如：先列出三个来源再总结', maxLines: 3),
               const SizedBox(height: 10),
-              Text(
+              mdText(
                 '用大白话写就行，模型能理解。\n'
                 '规则只在**对话时**生效 —— 应用没打开时不会自己触发。',
                 style: AppFonts.body(size: 11.5, color: s.muted, height: 1.6),

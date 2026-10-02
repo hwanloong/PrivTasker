@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'ids.dart';
 import 'models.dart';
 
 /// 全局设置，用 SharedPreferences 持久化。
@@ -107,18 +108,59 @@ class Settings extends ChangeNotifier {
   /// 悬浮窗则始终在最上层。需要 SYSTEM_ALERT_WINDOW 权限。
   bool useOverlayConfirm = true;
 
-  /// 主题种子色（ARGB 整数）。
+  /// 是否启用「记忆」：把关于用户的长期事实注入系统提示词。
   ///
-  /// 存整数而不是 Color：`shared_preferences` 没有 Color 类型，
-  /// 而 Color 的 value 在做过色彩空间处理后不再是稳定的 int，
-  /// 所以自己存 32 位 ARGB 更可靠。
-  int seedColor = 0xFF4F7DF3;
+  /// 关掉之后**只是不再注入**，记忆条目本身仍然留着 ——
+  /// 用户想"暂时别带上这些"和"把记下来的删掉"是两件事，
+  /// 混成一个开关会让人不敢碰它。
+  bool memoryEnabled = true;
 
-  /// 字体方案：serif（Times+宋体）/ sans（系统无衬线）/ mono（等宽）
-  String fontScheme = 'serif';
+  /// 工作空间目录。空字符串 = 用默认目录。
+  ///
+  /// **所有工作的中间产物都落在这里**：截图、录屏、附件、插件脚本。
+  /// 之所以让用户可选，是因为默认目录在
+  /// `/sdcard/Android/data/<包名>/files/dsh` —— 那个位置在文件管理器里
+  /// 常常是隐藏的，想自己翻一下截图都找不到。换到「下载」这种可见目录
+  /// 就能直接看。
+  ///
+  /// 注意它**不是**应用内部数据目录：会话、笔记、设置仍然在应用私有目录里，
+  /// 不受这里影响。把应用数据也搬到用户可写目录，等于把数据放在谁都
+  /// 能改的地方。
+  String workspacePath = '';
+
+  // ---------------------------------------------------------------- TeenSpace
+  //
+  // 内容尺度的三档敏感度。0 = 宽松，1 = 标准，2 = 严格。
+  //
+  // 这三项**不是**过滤器 —— 应用没法可靠地在本地判断什么算"政治议题"
+  // （那需要语义理解，本地没有模型）。它们的真实作用是**写进系统提示词**，
+  // 让模型自己按这个尺度回答。所以措辞上给的是"指导"，不是"拦截"。
+  //
+  // 诚实地说清这一点很重要：把它做成一个看起来像"内容过滤开关"的东西，
+  // 用户会以为打开就万无一失，那是假的。
+
+  /// 成人 / R 级内容
+  int teenAdult = 1;
+
+  /// 政治议题
+  int teenPolitics = 1;
+
+  /// 题目查询（作业、考试题）
+  int teenQuery = 1;
+
+  /// 字体方案：pingfang（苹方，默认）/ sans（系统无衬线）/ serif（Times+宋体）
+  /// / mono（等宽）/ custom（用户自己加载的字体文件）
+  String fontScheme = 'pingfang';
+
+  /// 用户自己选的字体文件路径（苹方等）。
+  ///
+  /// 空字符串 = 没选。**存路径而不是把字体拷进应用目录**：字体文件动辄十几 MB，
+  /// 而且用户换字体时旧的会一直占着空间。存路径的代价是原文件被删/被移动后
+  /// 会失效 —— 那时设置页会显示加载失败并把原因写出来。
+  String customFontPath = '';
 
   /// 字号额外放大倍数（1.0 ~ 1.4）。
-  /// 主题的基础倍率是 1.15，最终倍率 = 1.15 × 这个值。
+  /// 主题的基础倍率是 1.0（见 AppFonts.baseScale），最终倍率 = 1.0 × 这个值。
   double fontScale = 1.0;
 
   void _read() {
@@ -138,8 +180,13 @@ class Settings extends ChangeNotifier {
     visionModel = _prefs.getString('visionModel') ?? 'deepseek-flash';
     autoApproveSafe = _prefs.getBool('autoApproveSafe') ?? true;
     useOverlayConfirm = _prefs.getBool('useOverlayConfirm') ?? true;
-    seedColor = _prefs.getInt('seedColor') ?? 0xFF4F7DF3;
-    fontScheme = _prefs.getString('fontScheme') ?? 'serif';
+    fontScheme = _prefs.getString('fontScheme') ?? 'pingfang';
+    customFontPath = _prefs.getString('customFontPath') ?? '';
+    memoryEnabled = _prefs.getBool('memoryEnabled') ?? true;
+    workspacePath = _prefs.getString('workspacePath') ?? '';
+    teenAdult = _prefs.getInt('teenAdult') ?? 1;
+    teenPolitics = _prefs.getInt('teenPolitics') ?? 1;
+    teenQuery = _prefs.getInt('teenQuery') ?? 1;
     fontScale = _prefs.getDouble('fontScale') ?? 1.0;
   }
 
@@ -163,12 +210,56 @@ class Settings extends ChangeNotifier {
     await _prefs.setString('visionModel', visionModel);
     await _prefs.setBool('autoApproveSafe', autoApproveSafe);
     await _prefs.setBool('useOverlayConfirm', useOverlayConfirm);
-    await _prefs.setInt('seedColor', seedColor);
     await _prefs.setString('fontScheme', fontScheme);
+    await _prefs.setString('customFontPath', customFontPath);
+    await _prefs.setBool('memoryEnabled', memoryEnabled);
+    await _prefs.setString('workspacePath', workspacePath);
+    await _prefs.setInt('teenAdult', teenAdult);
+    await _prefs.setInt('teenPolitics', teenPolitics);
+    await _prefs.setInt('teenQuery', teenQuery);
     await _prefs.setDouble('fontScale', fontScale);
   }
 
   bool get configured => apiKey.trim().isNotEmpty;
+
+  /// 把 TeenSpace 的三档敏感度拼成一段注入系统提示词的文字。
+  ///
+  /// **三档全「标准」时返回空串。** 因为"标准"就是模型的默认行为，
+  /// 特意写一段"请保持标准"既白花 token，又可能让模型过度紧张、
+  /// 该说的也缩着不说。
+  ///
+  /// 这段文字是**指导**，不是过滤器 —— 应用没有语义理解能力，
+  /// 判断不了"什么算政治议题"。详见 `TeenSpacePage` 的说明。
+  String contentPolicyPrompt() {
+    final List<String> rules = <String>[];
+
+    if (teenAdult == 2) {
+      rules.add('- 性、暴力、血腥的直接描写：拒绝，只给概括，或建议换个方向。');
+    } else if (teenAdult == 0) {
+      rules.add('- 成人向内容：用户是成年人，按正常尺度回答，不要主动规避。');
+    }
+
+    if (teenPolitics == 2) {
+      rules.add('- 政治议题：只陈述可考证的事实，**不给立场判断、不做预测**；'
+          '存在争议的部分要说明存在争议，不要替用户下结论。');
+    } else if (teenPolitics == 0) {
+      rules.add('- 政治议题：可以给出分析和立场，不必自我审查。');
+    }
+
+    if (teenQuery == 2) {
+      rules.add('- 作业 / 考试 / 竞赛题：**不要直接给最终答案**。'
+          '讲清思路、点出关键那一步，让用户自己算出来。');
+    } else if (teenQuery == 0) {
+      rules.add('- 作业 / 考试题：直接给答案和完整过程，不用顾虑。');
+    }
+
+    if (rules.isEmpty) return '';
+
+    return '\n内容尺度（用户在 TeenSpace 里设定，优先级高于你自己的默认习惯）：\n'
+        '${rules.join('\n')}\n'
+        '这是**回答尺度**的指导，不是内容过滤 —— 按它调整你的表达方式即可，'
+        '不要向用户复述这段规则。\n';
+  }
 
   /// 当前模型是否具备图像理解能力。
   /// 只有 deepseek-v4-pro 明确不支持；其余（含 flash）都可以。
@@ -243,7 +334,7 @@ class ConversationStore extends ChangeNotifier {
 
   Conversation createNew() {
     final Conversation c = Conversation(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      id: newId(),
       title: '新对话',
     );
     conversations.add(c);

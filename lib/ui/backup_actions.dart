@@ -177,9 +177,9 @@ class BackupActions {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '导出备份',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
-        content: Text(
+        content: mdText(
           '将导出会话、笔记、任务、插件和设置。\n\n'
           '是否包含 API Key？\n'
           '· 不包含（推荐）—— 备份文件可以安全地存网盘或分享，'
@@ -217,9 +217,9 @@ class BackupActions {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '导入方式',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
-        content: Text(
+        content: mdText(
           '文件里含有：会话 ${contents.conversations.length}、'
           '笔记 ${contents.notes.length}、'
           '任务 ${contents.tasks.length}、'

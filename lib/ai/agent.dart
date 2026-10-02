@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../core/memory.dart';
 import '../core/metrics.dart';
 import '../core/models.dart';
 import '../core/productivity.dart';
@@ -18,7 +19,11 @@ import 'deepseek.dart';
 ///     「我是安卓助手」，所以这里只交代可用的能力和工作方式，让模型直接干活。
 ///  2. **必须说明「有些操作会被拦下来问用户」**——否则模型会以为命令已经
 ///     执行成功，继续往下推理出错误结论。
-String buildSystemPrompt({required bool shizukuReady}) => '''
+String buildSystemPrompt({
+  required bool shizukuReady,
+  bool memoryEnabled = true,
+  String contentPolicy = '',
+}) => '''
 你是用户的助手，可以直接操作这台设备来完成任务。
 
 当前可用能力：
@@ -103,6 +108,16 @@ ${shizukuReady ? '' : '''注意：当前没有取得系统命令执行权限，�
 直接告诉用户需要在应用里授予相应权限，不要反复尝试调用这些工具。
 联网搜索和图片识别不受影响，可以正常使用。'''}
 
+关于「记忆」：
+- 你有一个长期记忆（memory 工具），里面是**关于用户的既知事实**。
+- 什么时候该记：用户透露了会长期有效的信息（住在哪、叫什么、用什么工具、
+  偏好什么风格、有什么长期目标）。**当下这一轮的事不要记**。
+- 什么时候不该记：一次性的任务细节、已经写在笔记里的内容、任何密钥和密码。
+- 记之前先 list 看一眼，**不要重复记同一条**。
+- 用户说"忘掉某某"时用 search 找到再 forget；说"清空记忆"才用 clear。
+- 记忆会**每轮对话都带上**，所以每条都要短（一句话）。写成一整段总结会
+  把上下文吃掉一大块，用户只会觉得"越聊越傻"却找不到原因。
+
 关于安全确认：
 - 你的部分工具调用会先弹给用户确认，用户可能点「拒绝」。
 - 如果工具返回「用户拒绝执行」，说明这次操作**没有发生**。
@@ -110,6 +125,8 @@ ${shizukuReady ? '' : '''注意：当前没有取得系统命令执行权限，�
 - 危险操作（卸载、清除数据、删除文件等）请先说明后果，让用户有判断依据。
 
 回答格式：使用 Markdown。代码和命令用围栏代码块包裹。
+$contentPolicy
+${MemoryStore.instance.toPromptSection(memoryEnabled)}
 ${RuleStore.instance.toPromptSection()}
 ''';
 
@@ -175,11 +192,17 @@ Future<String?> _textFileContent(Attachment a) async {
 Future<List<Map<String, dynamic>>> buildApiMessages(
   Conversation conv, {
   required bool shizukuReady,
+  bool memoryEnabled = true,
+  String contentPolicy = '',
 }) async {
   final List<Map<String, dynamic>> out = <Map<String, dynamic>>[
     <String, dynamic>{
       'role': 'system',
-      'content': buildSystemPrompt(shizukuReady: shizukuReady),
+      'content': buildSystemPrompt(
+        shizukuReady: shizukuReady,
+        memoryEnabled: memoryEnabled,
+        contentPolicy: contentPolicy,
+      ),
     },
   ];
 
@@ -376,7 +399,12 @@ class AgentRunner {
     try {
       for (int round = 0; round < settings.maxToolRounds; round++) {
         final List<Map<String, dynamic>> messages =
-            await buildApiMessages(conversation, shizukuReady: shizuku.ready);
+            await buildApiMessages(
+          conversation,
+          shizukuReady: shizuku.ready,
+          memoryEnabled: settings.memoryEnabled,
+          contentPolicy: settings.contentPolicyPrompt(),
+        );
 
         // 占位的 assistant 消息，流式内容往它身上写
         final ChatMessage assistant = ChatMessage(
@@ -478,8 +506,17 @@ class AgentRunner {
             continue;
           }
 
-          final bool needConfirm =
-              inv.risk.level.needsConfirm || !settings.autoApproveSafe;
+          // 需不需要用户点确认。
+          //
+          // · 用户关掉了「只读命令自动执行」→ **一律要问**。
+          //   那是个总闸，语义是"我对这个应用不放心，什么都让我看一眼"。
+          //   如果 Python 能绕过它，总闸就是假的 —— 用户以为自己收紧了，
+          //   实际最危险的那个工具照样长驱直入。
+          // · 总闸开着时：风险是 safe 的直接跑；工具自己声明了 autoApprove
+          //   （目前只有 python）也直接跑；其余要问。
+          final bool needConfirm = settings.autoApproveSafe
+              ? (!tool.autoApprove && inv.risk.level.needsConfirm)
+              : true;
 
           if (needConfirm) {
             inv.status = InvocationStatus.awaitingConfirm;

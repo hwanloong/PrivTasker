@@ -1,21 +1,43 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../core/background.dart';
+import '../core/custom_font.dart';
+import '../core/memory.dart';
 import '../core/overlay.dart';
 import '../core/productivity.dart';
 import '../core/rules.dart';
-import '../core/selfhosted_search.dart';
 import '../core/store.dart';
 import '../plugins/plugin.dart';
 import '../theme/app_theme.dart';
 import '../theme/glass.dart';
 import '../tools/browser_tool.dart';
 import 'backup_actions.dart';
+import 'home_shell.dart';
+import 'memory_page.dart';
 import 'plugins_sheet.dart';
 import 'python_console_page.dart';
+import 'remote_page.dart';
 import 'rules_page.dart';
 import 'storage_sheet.dart';
+import 'teenspace_page.dart';
+import 'workspace_page.dart';
 
+/// 打开设置。
+///
+/// **是独立页面，不是底部面板。**
+///
+/// 原来是 `showModalBottomSheet`。改成页面有三个理由：
+/// · 设置内容很长（外观 / 接口 / 安全 / 联网 / 记忆 / 数据 / 更多），
+///   面板被高度上限压着，用户得在一个"只有八成屏高"的框里翻半天。
+/// · 面板随时可以被下滑手势误关，而设置里有些操作是**未保存的**
+///   （滑块、输入框），关了就得重来。
+/// · 页面上有明确的返回按钮，"我进了一个新地方"这件事是清楚的；
+///   面板会让人不确定"我是不是还在原来的页面上"。
+///
+/// 名字保留 `showSettingsSheet` 是为了不动调用点 —— 但它的行为已经是
+/// "push 一个页面"。下次有人看到这个名字觉得别扭，可以顺手改成
+/// `openSettings`。
 Future<void> showSettingsSheet(
   BuildContext context, {
   required Settings settings,
@@ -25,17 +47,16 @@ Future<void> showSettingsSheet(
   required NoteStore notes,
   required TaskStore tasks,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (BuildContext ctx) => _SettingsSheet(
-      settings: settings,
-      workDir: workDir,
-      plugins: plugins,
-      conversations: conversations,
-      notes: notes,
-      tasks: tasks,
+  return Navigator.of(context).push<void>(
+    MaterialPageRoute<void>(
+      builder: (BuildContext _) => _SettingsSheet(
+        settings: settings,
+        workDir: workDir,
+        plugins: plugins,
+        conversations: conversations,
+        notes: notes,
+        tasks: tasks,
+      ),
     ),
   );
 }
@@ -77,11 +98,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   late String _effort;
   late String _engine;
   late String _searchMode;
-  late final TextEditingController _selfHostedUrl;
-
-  /// 自建搜索服务的连接测试结果
-  String? _selfHostedStatus;
-  bool? _selfHostedOk;
   late bool _useOverlay;
   bool _showKey = false;
 
@@ -113,7 +129,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     _effort = s.reasoningEffort;
     _engine = s.searchEngine;
     _searchMode = s.webSearchMode;
-    _selfHostedUrl = TextEditingController(text: s.selfHostedSearchUrl);
     _useOverlay = s.useOverlayConfirm;
 
     OverlayService.canDraw().then((bool v) {
@@ -131,7 +146,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     _visionUrl.dispose();
     _visionKey.dispose();
     _visionModel.dispose();
-    _selfHostedUrl.dispose();
     super.dispose();
   }
 
@@ -154,34 +168,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       widget.settings.reasoningEffort = _effort;
       widget.settings.searchEngine = _engine;
       widget.settings.webSearchMode = _searchMode;
-      widget.settings.selfHostedSearchUrl = _selfHostedUrl.text.trim();
       widget.settings.useOverlayConfirm = _useOverlay;
-    });
-  }
-
-  /// 探活自建搜索服务。地址填错是最常见的失败原因，
-  /// 所以给它一个能立刻验证的按钮，而不是等到搜索失败才发现。
-  Future<void> _testSelfHosted() async {
-    final String url = _selfHostedUrl.text.trim();
-    if (url.isEmpty) {
-      setState(() {
-        _selfHostedOk = false;
-        _selfHostedStatus = '请先填地址';
-      });
-      return;
-    }
-
-    setState(() {
-      _selfHostedOk = null;
-      _selfHostedStatus = '正在连接…';
-    });
-
-    final String? err = await SelfHostedSearch.health(url);
-    if (!mounted) return;
-
-    setState(() {
-      _selfHostedOk = err == null;
-      _selfHostedStatus = err == null ? '连接正常' : '连接失败：$err';
     });
   }
 
@@ -213,9 +200,26 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               padding: const EdgeInsets.only(bottom: 4),
               child: InkWell(
                 borderRadius: BorderRadius.circular(AppRadius.code),
-                onTap: () => widget.settings.update(
-                  () => widget.settings.fontScheme = scheme.$1,
-                ),
+                onTap: () async {
+                  // 选「苹方 / 自定义字体」但还没选过文件时，**顺手把选文件
+                  // 的对话框弹出来**。
+                  //
+                  // 不这么做的话，用户点了这一项界面**毫无变化** ——
+                  // 字体文件还没加载，那个家族名不存在，Flutter 会静默回退到
+                  // 系统字体。用户只会觉得"这功能是坏的"。
+                  // （这正是"怎么加苹方"被问了两次的原因。）
+                  if (scheme.$1 == 'custom' && !CustomFont.loaded) {
+                    await _pickFontFile();
+                    if (!mounted) return;
+                    // 用户在选文件对话框里取消了 —— 那就别切过去，
+                    // 切了也没有任何效果。
+                    if (!CustomFont.loaded) return;
+                  }
+                  await widget.settings.update(
+                    () => widget.settings.fontScheme = scheme.$1,
+                  );
+                  if (mounted) setState(() {});
+                },
                 child: Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -253,6 +257,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 ),
               ),
             ),
+
+          const SizedBox(height: 8),
+          _customFontRow(s),
 
           const SizedBox(height: 10),
           Divider(color: s.border, height: 1),
@@ -292,67 +299,108 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     );
   }
 
-  /// 主题色选择器。
+  /// 自定义字体文件（苹方等）。
   ///
-  /// 只给「种子色」，不给整套配色 —— Material You 的做法是
-  /// `ColorScheme.fromSeed` 从一个种子推导出全部色板（容器色、强调色、
-  /// 暗色变体…），所以这里 8 个色块就够覆盖整套明暗配色。
-  Widget _colorPicker(AppSurface s) {
-    final int current = widget.settings.seedColor;
+  /// **为什么是"选文件"而不是把苹方打进包里：**
+  /// 苹方是苹果的系统字体，不能随仓库分发；更硬的一条是 Flutter 不支持
+  /// "可选字体资源" —— 写进 `pubspec.yaml` 却在打包时找不到文件会**直接让
+  /// 构建失败**，于是任何没有这个字体的人都编译不过去。
+  /// 详细的取舍见 `core/custom_font.dart` 的注释。
+  Widget _customFontRow(AppSurface s) {
+    final bool active = widget.settings.fontScheme == 'custom';
+    final bool loaded = CustomFont.loaded;
+    final String? err = CustomFont.error;
 
-    return SurfaceCard(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      decoration: BoxDecoration(
+        color: s.codeBg,
+        borderRadius: BorderRadius.circular(AppRadius.field),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      child: Row(
         children: <Widget>[
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: AppColors.seedPresets.map(((String, Color) preset) {
-              final (String name, Color color) = preset;
-              final bool active = color.toARGB32() == current;
-              return Tooltip(
-                message: name,
-                child: GestureDetector(
-                  onTap: () => widget.settings.update(
-                    () => widget.settings.seedColor = color.toARGB32(),
-                  ),
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                      border: active
-                          ? Border.all(color: s.text, width: 2.5)
-                          : null,
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: color.withValues(alpha: 0.35),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: active
-                        ? const Icon(Icons.check_rounded,
-                            size: 19, color: Colors.white)
-                        : null,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  loaded ? CustomFont.fileName : '未选择字体文件',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFonts.body(
+                    size: 12.8,
+                    weight: FontWeight.w600,
+                    color: s.text,
+                    height: 1.3,
                   ),
                 ),
-              );
-            }).toList(),
+                const SizedBox(height: 2),
+                Text(
+                  err ??
+                      (loaded
+                          ? (active ? '正在使用' : '已加载。选「苹方 / 自定义字体」后生效')
+                          : '选一个字体文件（苹方、思源等）。'
+                              '苹方是苹果的系统字体，不能随应用分发，'
+                              '所以要从你手机里的文件选。'),
+                  style: AppFonts.body(
+                    size: 11.2,
+                    color: err != null ? AppColors.danger : s.muted,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 11),
-          Text(
-            // 说明清楚它改的是什么范围，否则用户换完色发现"整个界面都变了"
-            // 会以为是 bug —— 这其实是 Material You 的正常行为。
-            '选一个种子色，整套配色（卡片、按钮、强调色，含暗色模式）都会由它推导。',
-            style: AppFonts.body(size: 11.8, color: s.muted, height: 1.5),
+          const SizedBox(width: 8),
+          GlassButton(
+            label: loaded ? '更换' : '选择',
+            fontSize: 12.5,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            onTap: _pickFontFile,
           ),
+          if (loaded) ...<Widget>[
+            const SizedBox(width: 6),
+            GlassButton(
+              label: '清除',
+              fontSize: 12.5,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              onTap: () async {
+                await widget.settings.update(() {
+                  CustomFont.clear();
+                  widget.settings.customFontPath = '';
+                  // 自定义字体没了，还停在这个方案上就会回退成系统字体 ——
+                  // 与其让用户对着一个"没效果"的选项，不如切回默认方案。
+                  if (widget.settings.fontScheme == 'custom') {
+                    widget.settings.fontScheme = 'sans';
+                  }
+                });
+                if (mounted) setState(() {});
+              },
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Future<void> _pickFontFile() async {
+    const XTypeGroup group = XTypeGroup(
+      label: '字体',
+      extensions: <String>['ttf', 'otf', 'ttc'],
+    );
+    final XFile? f = await openFile(acceptedTypeGroups: <XTypeGroup>[group]);
+    if (f == null) return;
+
+    final String? err = await CustomFont.loadFrom(f.path);
+
+    await widget.settings.update(() {
+      widget.settings.customFontPath = err == null ? f.path : '';
+      // 选成功就顺手切过去 —— 用户挑字体文件的目的就是要用它，
+      // 再让他回去点一下"自定义字体"是多余的步骤。
+      if (err == null) widget.settings.fontScheme = 'custom';
+    });
+
+    if (mounted) setState(() {});
   }
 
   /// 图标 + 标题 + 说明 + 右箭头的可点条目
@@ -386,7 +434,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  Text(
+                  mdText(
                     desc,
                     style:
                         AppFonts.body(size: 12, color: s.muted, height: 1.45),
@@ -446,7 +494,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
+            mdText(
               // 说清"两件事"和"仍不保证"，否则用户会以为开了就一定跑完
               '前台服务挡得住内存回收，但挡不住 Doze（打盹时挂起 CPU、断网），'
               '所以还需要把它加入电池优化白名单。\n\n'
@@ -572,28 +620,28 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   Widget build(BuildContext context) {
     final AppSurface s = AppSurface.of(context);
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.88,
-        ),
-        decoration: BoxDecoration(
-          color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: s.border, width: 0.8)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            _handle(s),
-            Flexible(
-              child: ListView(
+    return Scaffold(
+      backgroundColor: s.isDark ? AppColors.darkBg : AppColors.lightBg,
+      body: Column(
+        children: <Widget>[
+          // 页头用和笔记/任务页同一个 AppHeader —— 三个页面的头部样式
+          // 必须完全一致，否则"设置"看起来像另一个应用。
+          AppHeader(
+            title: '设置',
+            leading: GlassIconButton(
+              icon: Icons.arrow_back_ios_new_rounded,
+              tooltip: '返回',
+              size: 38,
+              iconSize: 19,
+              onTap: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+          Expanded(
+            child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
                 children: <Widget>[
                   _section(s, '外观'),
-                  _colorPicker(s),
-                  const SizedBox(height: 12),
+                  // 主题色（种子色）选择器已删除 —— 见 AppColors.accent 的注释。
                   _fontOptions(s),
 
                   _section(s, '接口与模型'),
@@ -771,7 +819,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     value: _autoApproveSafe,
                     onChanged: (bool v) => setState(() => _autoApproveSafe = v),
                   ),
-                  const SizedBox(height: 10),
+                  // 这里原来有个 `SizedBox(height: 10)`。`_switchRow` 现在
+                  // 自带 9 的下间距，再补一个就变成 19 —— 比别处都宽。
                   _overlayRow(s),
 
                   _section(s, '联网与识图'),
@@ -881,6 +930,38 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     label: '视觉模型（可选）',
                     controller: _visionModel,
                     hint: 'deepseek-flash',
+                  ),
+
+                  _section(s, '记忆'),
+                  _note(
+                    s,
+                    'Agent 会自己判断哪些是"会长期有效的事实"并记下来'
+                    '（你住在哪、习惯用什么工具、偏好什么风格），每轮对话都会带上。\n'
+                    '开关关掉只是**不再带上**，条目仍然留着 —— 想真正删掉就进'
+                    '「管理记忆」。这两件事分开是有意的：不然你会不敢碰这个开关。',
+                  ),
+                  _switchRow(
+                    s,
+                    label: '启用记忆',
+                    desc: '关闭后记忆不再注入对话，但不会被删除',
+                    value: widget.settings.memoryEnabled,
+                    onChanged: (bool v) async {
+                      await widget.settings
+                          .update(() => widget.settings.memoryEnabled = v);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                  _entryCard(
+                    s,
+                    icon: Icons.psychology_outlined,
+                    title: '管理记忆',
+                    desc: '查看记住了什么、逐条删除、清空全部',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) =>
+                            MemoryPage(store: MemoryStore.instance),
+                      ),
+                    ),
                   ),
 
                   _section(s, '数据与扩展'),
@@ -1018,38 +1099,50 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       ],
                     ),
                   ),
+                  _section(s, '更多'),
+                  _entryCard(
+                    s,
+                    icon: Icons.desktop_windows_outlined,
+                    title: '远程控制',
+                    desc: '从电脑浏览器操作这台手机 —— **尚未实现**，先占位',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) => const RemotePage(),
+                      ),
+                    ),
+                  ),
+                  _entryCard(
+                    s,
+                    icon: Icons.shield_moon_outlined,
+                    title: 'TeenSpace',
+                    desc: '成人内容 / 政治议题 / 题目查询的回答尺度',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) =>
+                            TeenSpacePage(settings: widget.settings),
+                      ),
+                    ),
+                  ),
+                  _entryCard(
+                    s,
+                    icon: Icons.workspaces_outline,
+                    title: '工作空间',
+                    desc: widget.settings.workspacePath.trim().isEmpty
+                        ? '截图、录屏、附件的存放位置 · 当前用默认'
+                        : '截图、录屏、附件的存放位置 · 当前是自定义目录',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) => WorkspacePage(
+                          settings: widget.settings,
+                          defaultWorkDir: widget.workDir,
+                        ),
+                      ),
+                    ),
+                  ),
+
                   const SizedBox(height: 20),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _handle(AppSurface s) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10, bottom: 12),
-      child: Column(
-        children: <Widget>[
-          Container(
-            width: 38,
-            height: 4,
-            decoration: BoxDecoration(
-              color: s.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            '设置',
-            style: AppFonts.body(
-              size: 17,
-              weight: FontWeight.w700,
-              color: s.text,
-              height: 1.2,
-            ),
           ),
         ],
       ),
@@ -1063,7 +1156,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         title,
         style: AppFonts.body(
           size: 12.5,
-          weight: FontWeight.w700,
+          weight: FontWeight.w600,
           color: s.muted,
           height: 1.2,
           letterSpacing: 0.3,
@@ -1093,7 +1186,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           Container(
             decoration: BoxDecoration(
               color: s.surface,
-              borderRadius: BorderRadius.circular(AppRadius.code),
+              // 胶囊，和聊天页的输入框、以及所有按钮统一。
+              // 它是个普通 Container，不存在 OutlineInputBorder 在
+              // 大圆角处描边畸变的问题，所以可以直接拉到最大。
+              borderRadius: BorderRadius.circular(AppRadius.pill),
               border: Border.all(color: s.border, width: 0.9),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -1189,6 +1285,15 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     required ValueChanged<bool> onChanged,
   }) {
     return SurfaceCard(
+      // **自带下间距。**
+      //
+      // 原来没有，于是它和紧跟在后面的那个条目卡**贴在一起** ——
+      // 设置里的「启用记忆」开关和「管理记忆」看起来是一块，
+      // 分不清哪个是开关哪个是入口。
+      //
+      // 放在这里而不是在每个调用点补 SizedBox：全项目有 3 处开关行，
+      // 漏一处就是一处贴在一起，而这种"只有某个地方挤在一起"最难看。
+      margin: const EdgeInsets.only(bottom: 9),
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1246,7 +1351,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             ),
             const SizedBox(width: 9),
             Expanded(
-              child: Text(
+              child: mdText(
                 text,
                 style: AppFonts.body(size: 12.4, color: s.text, height: 1.6),
               ),

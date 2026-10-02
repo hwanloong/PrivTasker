@@ -2,12 +2,23 @@
 
 **这个目录里的字体文件不随仓库分发。**
 
-本目录在 `.gitignore` 中被排除。请按下文自行准备，否则构建会因为找不到字体资源而失败。
+本目录在 `.gitignore` 中被排除。**请按下文自行准备，否则构建会因为找不到字体资源而失败。**
+
+> **为什么必须放：** 即使界面**默认**用的是 Android 系统族名
+> （`sans-serif` / `monospace`）、运行时根本不加载这里的文件，
+> `pubspec.yaml` 的 `fonts:` 段**仍然声明了**这些资源路径。
+> Flutter 打包时会逐个去找，找不到就直接报错 —— 它不支持"可选字体资源"。
+>
+> 也就是说：**默认方案不需要这些字体，但这个仓库的构建需要。** 两件事不一样。
+>
+> 想彻底摆脱这个依赖，就得把 `pubspec.yaml` 的 `fonts:` 段整个删掉，
+> 代价是设置里的「衬线」方案会失去 Times / 宋体（回退成系统字体）。
 
 ## 需要哪些文件
 
 ```
 assets/fonts/
+├── pingfang.ttf      PingFang SC Regular（苹方，**默认字体方案**）
 ├── times.ttf         Times New Roman Regular
 ├── timesbd.ttf       Times New Roman Bold
 ├── timesi.ttf        Times New Roman Italic
@@ -18,17 +29,28 @@ assets/fonts/
 └── consolai.ttf      Consolas Italic
 ```
 
+> **苹方是默认字体方案**，所以缺了它界面会回退到系统字体（不会崩，
+> 但看不到预期的观感）。它是苹果的系统字体，最早只在 macOS 上。
+>
+> `PingFang.ttc` 是**字体集合**（一个文件装多个字重），Flutter 对 `.ttc`
+> 支持不确定 —— 先用 `extract_ttc.dart` 抽成单个 `.ttf` 再放进来。
+> 抽出来应该是 `00 01 00 00` 开头的合法 sfnt，约 11 MB。
+>
+> 只放 **Regular** 一个字重就够：苹方每个字重约 11 MB，6 个字重全带会让
+> APK 多出 60 MB。粗体由 Flutter 合成，对这种黑体观感可以接受。
+
 ## 为什么要自己准备
 
-这三款字体都是**商业专有字体**：
+这几款字体都是**商业专有字体**：
 
 | 字体 | 权利人 |
 |---|---|
+| 苹方 PingFang SC | 苹果 (Apple) |
 | Times New Roman | Monotype |
 | 宋体 SimSun | 中易中标 / Microsoft |
 | Consolas | Microsoft |
 
-它们随 Windows 授权给**本机使用者**，但授权范围**不包括再分发**。
+它们随各自的操作系统授权给**本机使用者**，但授权范围**不包括再分发**。
 把它们提交到公开仓库或公开分发带字体的构建产物都属于侵权。
 
 在你自己的机器上使用属于正常的系统授权范围。
@@ -94,6 +116,6 @@ dart ..\..\tools\extract_ttc.dart simsun.ttc --list
 换字体只需改两处：
 
 1. `pubspec.yaml` 的 `fonts:` 段（资源路径与家族名）
-2. `lib/theme/app_theme.dart` 的 `AppFonts.latin` / `cjk` / `mono`
+2. `lib/theme/app_theme.dart` 的 `AppFonts.applyScheme()`（三个方案的家族名）
 
 全项目只有这两处引用字体名。

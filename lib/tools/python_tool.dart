@@ -62,6 +62,21 @@ class PythonTool extends AgentTool {
     return PythonRisk.classify(args.str('code'));
   }
 
+  /// **Python 直接执行，不弹确认框。**
+  ///
+  /// 这是用户明确要求的取舍，理由站得住：
+  /// · Python 工具的价值就在"自己写、自己跑、自己看报错、自己改"这个闭环。
+  ///   每跑一次都要点一下确认，这个闭环就断了 —— 模型改一行代码要等一次人工，
+  ///   用户实际上得到的是一个"需要伺候的 REPL"，不是 agent。
+  /// · 它跑在**应用自己的进程**里，碰不到 Shizuku 那套系统能力；能碰到的
+  ///   最多是本应用的数据文件。真正危险的是 shell / Termux 那种能操作系统的东西。
+  ///
+  /// 但**风险等级照实报**（见 [autoApprove] 的注释）：工具行上该是红点还是红点，
+  /// 用户仍然能一眼看出刚才那段代码干了什么。关掉的只是"要不要点一下"，
+  /// 不是"要不要告诉用户"。
+  @override
+  bool get autoApprove => true;
+
   @override
   String summarize(Map<String, dynamic> args) {
     final String c = args.str('code').trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -128,12 +143,6 @@ class PythonTool extends AgentTool {
 /// · 删除、改系统、动态执行远程代码 → 危险
 class PythonRisk {
   const PythonRisk._();
-
-  /// 明确只读或纯计算
-  static final List<RegExp> _safe = <RegExp>[
-    // 纯数学/字符串，完全无副作用
-    RegExp(r'^\s*[\d\s+\-*/%().,eE_*]+$'),
-  ];
 
   /// 明确危险
   static final List<RegExp> _dangerous = <RegExp>[

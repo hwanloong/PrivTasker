@@ -9,10 +9,16 @@ Future<void> showHistorySheet(
   BuildContext context, {
   required ConversationStore store,
 }) {
+  // **刻意用普通的 showModalBottomSheet，不用液态玻璃。**
+  //
+  // 这一页是一列会话，通篇都是内容（白卡片），没有"浮在内容之上的控制层"。
+  // 玻璃的意义是让背后的东西透出来，而这里背后就是聊天的背景 ——
+  // 透出来只会让一列卡片浮在半透明的底上，读起来更费劲，也不好看。
+  //
+  // 玻璃留给真正的导航层（标签栏、按钮、别的面板）。
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext ctx) => _HistorySheet(store: store),
   );
 }
@@ -52,11 +58,6 @@ class _HistorySheetState extends State<_HistorySheet> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.82,
       ),
-      decoration: BoxDecoration(
-        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(top: BorderSide(color: s.border, width: 0.8)),
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -81,19 +82,24 @@ class _HistorySheetState extends State<_HistorySheet> {
                         '历史记录',
                         style: AppFonts.body(
                           size: 17,
-                          weight: FontWeight.w700,
+                          weight: FontWeight.w600,
                           color: s.text,
                           height: 1.2,
                         ),
                       ),
                     ),
-                    GlassButton(
-                      label: '新对话',
+                    // 「新对话」就是一个加号。
+                    //
+                    // 原来是个带文字的强调色胶囊按钮，在标题行里太重了 ——
+                    // 它和左边的「历史记录」标题抢注意力，而它其实只是个
+                    // 常规动作。一个加号图标够了：加号在列表语境里就是"新建"，
+                    // 不需要文字解释。
+                    GlassIconButton(
                       icon: Icons.add_rounded,
-                      accent: true,
-                      fontSize: 13,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 13, vertical: 8),
+                      tooltip: '新对话',
+                      size: 36,
+                      iconSize: 20,
+                      color: AppColors.accent,
                       onTap: () {
                         widget.store.createNew();
                         Navigator.of(context).pop();
@@ -125,6 +131,15 @@ class _HistorySheetState extends State<_HistorySheet> {
                     ),
                   )
                 : ListView.builder(
+                    // **shrinkWrap**：面板的高度跟着内容走，而不是一律撑到
+                    // 上限。
+                    //
+                    // 配上玻璃面板之后这件事变得明显了：以前底色是灰的，
+                    // 撑满看不出；现在半透明，"只有一条会话却占了八成屏"
+                    // 就是一大片空玻璃。
+                    //
+                    // 会话很多时它仍然受上面的 maxHeight 约束，会正常滚动。
+                    shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                     itemCount: list.length,
                     itemBuilder: (BuildContext context, int i) {
@@ -191,7 +206,7 @@ class _HistorySheetState extends State<_HistorySheet> {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '清空全部历史？',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
         content: Text(
           '所有会话记录都会被删除，且无法恢复。',

@@ -19,7 +19,6 @@ Future<void> showPerformanceSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext ctx) => _PerformanceSheet(
       settings: settings,
       contextTokens: contextTokens,
@@ -27,46 +26,23 @@ Future<void> showPerformanceSheet(
   );
 }
 
-class _PerformanceSheet extends StatefulWidget {
+/// 独立面板的外壳：把手 + 标题。
+///
+/// 内容本身在 [PerformanceBody] —— 对话页「+」里的「性能工具」标签页直接
+/// 复用它，不需要再套一层把手（那里已经在一个面板里了）。
+class _PerformanceSheet extends StatelessWidget {
   const _PerformanceSheet({required this.settings, required this.contextTokens});
 
   final Settings settings;
   final int contextTokens;
 
   @override
-  State<_PerformanceSheet> createState() => _PerformanceSheetState();
-}
-
-class _PerformanceSheetState extends State<_PerformanceSheet> {
-  @override
-  void initState() {
-    super.initState();
-    AppMetrics.instance.addListener(_onChange);
-  }
-
-  @override
-  void dispose() {
-    AppMetrics.instance.removeListener(_onChange);
-    super.dispose();
-  }
-
-  void _onChange() {
-    if (mounted) setState(() {});
-  }
-
-  @override
   Widget build(BuildContext context) {
     final AppSurface s = AppSurface.of(context);
-    final AppMetrics m = AppMetrics.instance;
 
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.85,
-      ),
-      decoration: BoxDecoration(
-        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(top: BorderSide(color: s.border, width: 0.8)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -88,7 +64,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
                   '性能',
                   style: AppFonts.body(
                     size: 17,
-                    weight: FontWeight.w700,
+                    weight: FontWeight.w600,
                     color: s.text,
                     height: 1.2,
                   ),
@@ -97,9 +73,65 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
             ),
           ),
           Flexible(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-              children: <Widget>[
+            child: PerformanceBody(
+              settings: settings,
+              contextTokens: contextTokens,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 性能面板的**内容**。两个入口共用：
+///
+/// · 设置里的「性能」→ `showPerformanceSheet`（外面套一层把手 + 标题）
+/// · 对话页「+」→「性能工具」标签页（已经在一个面板里了，不要再套一层）
+///
+/// 抽成公共组件而不是复制一份：这两个入口显示的是**同一批数字**，
+/// 复制之后迟早会长得不一样 —— 而"两处的数字对不上"是最伤信任的。
+class PerformanceBody extends StatefulWidget {
+  const PerformanceBody({
+    super.key,
+    required this.settings,
+    this.contextTokens = 0,
+    this.padding = const EdgeInsets.fromLTRB(16, 0, 16, 24),
+  });
+
+  final Settings settings;
+  final int contextTokens;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  State<PerformanceBody> createState() => _PerformanceBodyState();
+}
+
+class _PerformanceBodyState extends State<PerformanceBody> {
+  @override
+  void initState() {
+    super.initState();
+    AppMetrics.instance.addListener(_onChange);
+  }
+
+  @override
+  void dispose() {
+    AppMetrics.instance.removeListener(_onChange);
+    super.dispose();
+  }
+
+  void _onChange() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppSurface s = AppSurface.of(context);
+    final AppMetrics m = AppMetrics.instance;
+
+    return ListView(
+      padding: widget.padding,
+      children: <Widget>[
                 // ---------------- 缓存 ----------------
                 _section(s, '搜索缓存'),
                 _metricCard(
@@ -154,7 +186,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
                         ),
                         const SizedBox(width: 9),
                         Expanded(
-                          child: Text(
+                          child: mdText(
                             m.hasMeasuredUsage
                                 ? '其中 ${m.measuredCalls} 次是服务端实测值'
                                     '${m.estimatedCalls > 0 ? '，${m.estimatedCalls} 次为本地估算' : ''}。'
@@ -192,11 +224,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
                     style: AppFonts.body(size: 11.5, color: s.muted),
                   ),
                 ),
-              ],
-            ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -277,7 +305,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
         title,
         style: AppFonts.body(
           size: 12.5,
-          weight: FontWeight.w700,
+          weight: FontWeight.w600,
           color: s.muted,
           height: 1.2,
           letterSpacing: 0.3,
@@ -317,7 +345,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
                 value,
                 style: AppFonts.body(
                   size: 22,
-                  weight: FontWeight.w700,
+                  weight: FontWeight.w600,
                   color: accent ? AppColors.success : s.text,
                   height: 1.1,
                 ),

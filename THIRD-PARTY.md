@@ -5,7 +5,8 @@
 **先说结论**：
 
 - ✅ **代码许可是 MIT**，新引入的依赖全是宽松许可，随 APK 分发没问题
-- ⚠️ **但字体不行** —— 三款商业字体不随仓库分发，详见下面第一节
+- ⚠️ **字体不行** —— 三款商业字体不随仓库分发。**不过默认方案运行时不用它们**，
+  只有「衬线」方案和代码块会用到（见第一节）
 - ⚠️ **内嵌的 Python 包会随 APK 分发**，加新包前必须核对许可（见第二节）
 
 ---
@@ -51,13 +52,29 @@ APK 里嵌入了一套 CPython 3.13 运行时（由 Chaquopy 提供），以及�
 
 ## ⚠️ 字体：未随仓库分发
 
-本项目界面用到三款字体，**它们都是商业专有字体，不包含在本仓库中**，也不得随本项目再分发。
+界面**默认**用的是 Android 系统族名（`sans-serif` / `monospace`），
+**运行时**不加载任何自带字体文件。
+
+但 `pubspec.yaml` 的 `fonts:` 段仍然声明了下面三款字体，**构建时会去找这些文件**，
+所以从仓库克隆后必须自行准备（见 `assets/fonts/README.md`）——
+也就是说这个仓库**默认构建出来的 APK 是带商业字体的，不能公开分发**。
+
+设置里可切换的「衬线」方案用到前两款：
 
 | 字体 | 权利人 | 用途 |
 |---|---|---|
-| **Times New Roman** | Monotype | 英文正文 |
-| **宋体 SimSun** | 中易中标 / Microsoft | 中文正文 |
+| 字体 | 权利人 | 用途 |
+|---|---|---|
+| **苹方 PingFang SC** | 苹果 (Apple) | **默认方案的正文（内置）** |
+| **Times New Roman** | Monotype | 衬线方案的英文正文 |
+| **宋体 SimSun** | 中易中标 / Microsoft | 衬线方案的中文正文 |
 | **Consolas** | Microsoft | 代码块 |
+| **Consolas** | Microsoft | 三套方案共用的代码块字体 |
+
+> 代码块也用了 Consolas。它是商业字体，所以**只要发出去的 APK 里带了
+> `assets/fonts/`，三款都算侵权** —— 与用户选哪套方案无关。
+> 想干净地公开分发，就得删掉 `pubspec.yaml` 的 `fonts:` 段、
+> 并让代码块回退到 `monospace`。
 
 这些字体随 Windows 授权给**本机使用者**，授权范围**不包括再分发**。
 把它们打进公开仓库、APK 或任何形式的公开分发，都属于侵权。
@@ -93,9 +110,36 @@ Remove-Item simsun.ttc      # 别把 17.8MB 的集合文件也留下
 
 抽出来应该是 `simsun.ttf`，约 17.5 MB，文件头是 `00 01 00 00`。
 
+> `extract_ttc.dart` **不在本仓库里**，它在工作区上一层的 `tools/` 下
+> （即 `D:\pj3\tools\extract_ttc.dart`）。上面那条命令里的 `..\..\tools\`
+> 就是按这个位置写的。
+
 > **为什么要抽而不是直接用 `.ttc`：** Flutter 对 TrueType 集合的支持不明确，
 > 最坏情况是加载失败后**静默回退成黑体** —— 界面上中文会变成另一种字体，
 > 而这种问题在手机上不容易当场发现。详见 `tools/extract_ttc.dart` 里的说明。
+
+### 苹方：内置为默认方案，但同样不进仓库
+
+苹方（PingFang SC）是**默认字体方案**，所以要放进 `assets/fonts/pingfang.ttf`
+并在 `pubspec.yaml` 的 `fonts:` 段声明 —— 它和 Times / 宋体 / Consolas 走同一套约定。
+
+这意味着一个必须说清楚的前提：**Flutter 不支持"可选字体资源"** ——
+在 `fonts:` 段里声明了却在打包时找不到文件，构建会**直接失败**。
+所以克隆这个仓库的人必须自己准备好这几个字体文件（清单见 `assets/fonts/README.md`），
+否则编译不过去。这是本项目一贯的取舍，不是这次新增的负担。
+
+字体文件本身**不进仓库**（`assets/fonts/*.ttf|ttc|otf` 在 `.gitignore` 里），
+也不会随仓库分发到别人手上。
+
+### 自定义字体：运行时加载，完全不进构建
+
+设置里还有一套「自定义字体文件」方案，**不在 `pubspec.yaml` 里声明任何资源**，
+而是让用户在运行时选一个字体文件（`.ttf` / `.otf` / `.ttc`），由
+`lib/core/custom_font.dart` 用 `FontLoader` 注册。
+
+它的好处是**换任何字体都不用改代码重新构建**，也不受上面那个
+"声明了就必须存在"的约束。代价是只对**本机这一份安装**生效，
+换设备要重新选一次（路径存在 `SharedPreferences`，同设备升级不会丢）。
 
 ### 想换成可自由分发的字体
 
@@ -107,8 +151,8 @@ Remove-Item simsun.ttc      # 别把 17.8MB 的集合文件也留下
 | 英文衬线 | [EB Garamond](https://github.com/octaviopardo/EBGaramond12) / [Linux Libertine](https://github.com/alerque/libertinus) | SIL OFL 1.1 |
 | 等宽 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 |
 
-换字体只需要改 `pubspec.yaml` 的 `fonts:` 段和 `lib/theme/app_theme.dart` 里的
-`AppFonts.latin` / `cjk` / `mono` 三个家族名 —— 全项目只有这两处引用字体名。
+换字体只需要改 `pubspec.yaml` 的 `fonts:` 段和 `lib/theme/app_theme.dart` 里
+`AppFonts.applyScheme()` 中的家族名 —— 全项目只有这两处引用字体名。
 
 ---
 

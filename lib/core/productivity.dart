@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'ids.dart' as ids;
+
 /// 一条笔记
 class Note {
   Note({
@@ -215,8 +217,10 @@ abstract class _JsonListStore<T> extends ChangeNotifier {
     saveQuietly();
   }
 
-  static String newId() =>
-      DateTime.now().microsecondsSinceEpoch.toString();
+  /// 生成 id。委托给 `core/ids.dart` —— 那里解释了**为什么不能只用时间戳**
+  /// （Windows 上 `DateTime.now()` 是毫秒级，连续创建会撞 id，而删除按 id
+  /// 匹配，一撞就会误删多条）。
+  static String newId() => ids.newId();
 }
 
 class NoteStore extends _JsonListStore<Note> {

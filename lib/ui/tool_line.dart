@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../core/models.dart';
 import '../theme/app_theme.dart';
-import '../theme/glass.dart';
 
 /// 工具调用的一行式显示。
 ///
@@ -63,7 +62,7 @@ class _ToolLineState extends State<ToolLine> {
                           text: '${_shortName(inv.name)}：',
                           style: AppFonts.body(
                             size: 13,
-                            weight: FontWeight.w700,
+                            weight: FontWeight.w600,
                             color: AppColors.accent,
                             height: 1.35,
                           ),

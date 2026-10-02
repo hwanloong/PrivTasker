@@ -105,6 +105,13 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
       existing.body = _body.text;
       existing.tags = tagList;
       existing.isMarkdown = _isMarkdown;
+      // **这一行原来漏了。**
+      //
+      // 新建笔记的路径（上面那个 if 分支）设了 folderId，编辑已有笔记的
+      // 路径却没设 —— 于是"把这条笔记归到另一个文件夹"这个操作
+      // **完全无效**：选完文件夹、返回、保存，选择被静默丢掉，
+      // 笔记还留在原来的地方。用户只会觉得"这个功能坏了"。
+      existing.folderId = _folderId;
       widget.store.touch(existing);
     }
   }
@@ -211,7 +218,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
             label,
             style: AppFonts.body(
               size: 12.5,
-              weight: active ? FontWeight.w700 : FontWeight.w500,
+              weight: active ? FontWeight.w600 : FontWeight.w500,
               color: active ? s.text : s.muted,
               height: 1.2,
             ),
@@ -258,7 +265,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
           controller: _title,
           style: AppFonts.body(
             size: 20,
-            weight: FontWeight.w700,
+            weight: FontWeight.w600,
             color: s.text,
             height: 1.3,
           ),
@@ -373,16 +380,9 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
 
     final String? picked = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Colors.transparent,
       builder: (BuildContext ctx) {
         final AppSurface s = AppSurface.of(ctx);
-        return Container(
-          decoration: BoxDecoration(
-            color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border(top: BorderSide(color: s.border, width: 0.8)),
-          ),
-          child: SafeArea(
+        return SafeArea(
             top: false,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -392,7 +392,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
                   '放到哪个文件夹',
                   style: AppFonts.body(
                     size: 16,
-                    weight: FontWeight.w700,
+                    weight: FontWeight.w600,
                     color: s.text,
                     height: 1.2,
                   ),
@@ -414,7 +414,6 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
                   const SizedBox(height: 12),
               ],
             ),
-          ),
         );
       },
     );
@@ -476,7 +475,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '删除笔记',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
         content: Text(
           '「${n.title}」将被删除，无法恢复。',

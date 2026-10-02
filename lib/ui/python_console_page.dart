@@ -110,7 +110,7 @@ class _PythonConsolePageState extends State<PythonConsolePage> {
       child: Row(
         children: <Widget>[
           GlassIconButton(
-            icon: Icons.arrow_back_rounded,
+            icon: Icons.arrow_back_ios_new_rounded,
             tooltip: '返回',
             size: 38,
             iconSize: 19,
@@ -122,7 +122,7 @@ class _PythonConsolePageState extends State<PythonConsolePage> {
               'Python 控制台',
               style: AppFonts.body(
                 size: 17,
-                weight: FontWeight.w700,
+                weight: FontWeight.w600,
                 color: s.text,
                 height: 1.2,
               ),
@@ -160,7 +160,7 @@ class _PythonConsolePageState extends State<PythonConsolePage> {
                   ok ? '解释器可用' : '解释器不可用',
                   style: AppFonts.body(
                     size: 13.5,
-                    weight: FontWeight.w700,
+                    weight: FontWeight.w600,
                     color: s.text,
                     height: 1.3,
                   ),
@@ -282,7 +282,7 @@ class _PythonConsolePageState extends State<PythonConsolePage> {
                 r.ok ? '输出' : '出错了',
                 style: AppFonts.body(
                   size: 12.5,
-                  weight: FontWeight.w700,
+                  weight: FontWeight.w600,
                   color: tint,
                   height: 1.2,
                 ),

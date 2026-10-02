@@ -12,7 +12,6 @@ Future<void> showStorageSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext ctx) =>
         _StorageSheet(workDir: workDir, onCleared: onCleared),
   );
@@ -53,7 +52,7 @@ class _StorageSheetState extends State<_StorageSheet> {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '删除$what？',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
         content: Text(
           warning ?? '删除后无法恢复。',
@@ -95,11 +94,6 @@ class _StorageSheetState extends State<_StorageSheet> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.82,
       ),
-      decoration: BoxDecoration(
-        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(top: BorderSide(color: s.border, width: 0.8)),
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -120,7 +114,7 @@ class _StorageSheetState extends State<_StorageSheet> {
                   '存储空间',
                   style: AppFonts.body(
                     size: 17,
-                    weight: FontWeight.w700,
+                    weight: FontWeight.w600,
                     color: s.text,
                     height: 1.2,
                   ),
@@ -164,7 +158,7 @@ class _StorageSheetState extends State<_StorageSheet> {
                                         : StorageReport.human(r.totalBytes),
                                     style: AppFonts.body(
                                       size: 18,
-                                      weight: FontWeight.w700,
+                                      weight: FontWeight.w600,
                                       color: s.text,
                                       height: 1.2,
                                     ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../core/productivity.dart';
 import '../core/store.dart';
@@ -63,8 +64,13 @@ class _HomeShellState extends State<HomeShell> {
     final AppSurface s = AppSurface.of(context);
 
     return Scaffold(
-      backgroundColor:
-          s.isDark ? AppColors.darkBg : AppColors.lightBg,
+      backgroundColor: s.isDark ? AppColors.darkBg : AppColors.lightBg,
+      // 让 body 延伸到标签栏**后面**。
+      //
+      // 这不是装饰性的：玻璃靠**折射背后的东西**成立，背后什么都没有的话，
+      // 它看起来就是一块平的半透明色块 —— 用户会觉得"玻璃效果没生效"。
+      // 打开这个之后，消息和列表会从玻璃底下滚过去，折射是真的。
+      extendBody: true,
       body: IndexedStack(
         index: _index,
         children: <Widget>[
@@ -85,149 +91,186 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
+  /// 底部标签栏：液态玻璃的**悬浮胶囊**。
+  ///
+  /// 底部标签栏：**液态玻璃**（`GlassTabBar.bottom`）。
+  ///
+  /// ## 为什么必须显式传 `settings:`
+  ///
+  /// 之前我为了"避开发白"换成了手写的 `BackdropFilter` —— 结果把液态效果
+  /// 也一起砍掉了。用户的原话是"你把液态效果修没了"。那是错的解法：
+  /// 该修的是**颜色**，不是实现。
+  ///
+  /// 发白的根因：包为深色模式准备的玻璃底色是 `glassColor: 白色 8%`。
+  /// 在纯黑页面上这个"8% 白"叠加 shader 的高光/色差之后，看起来就是发白。
+  ///
+  /// 所以这里**显式给一套完整的 settings**，把深色下的底色换成一个
+  /// 明确的深色（`#1C1C1E` 的 55%），其余参数沿用包为亮/暗分别调好的值。
+  ///
+  /// > 注意必须是**完整**的一套。`LiquidGlassSettings` 的构造参数全都带默认值，
+  /// > 只传其中几个等于把其余几十个（lightIntensity、bodyMode…）重置成构造
+  /// > 默认值 —— 那是砸掉，不是微调。（这一条我踩过一次。）
   Widget _nav(BuildContext context, AppSurface s) {
-    // 待办数量做成角标：不用切过去就知道有没有事
     final int pending = widget.tasks.pending.length;
     final int overdue = widget.tasks.overdue.length;
+    final bool dark = s.isDark;
+    final Color idle = s.muted;
 
-    return GlassBar(
-      hairlineTop: true,
+    return Padding(
+      // 左右留 10：液态玻璃标签栏是**浮**在内容上的，四周要露出页面底色
+      // 才看得出它是一块玻璃。贴边通栏会把这个效果抹掉（也试过，被否了）。
       padding: EdgeInsets.fromLTRB(
-        8,
-        6,
-        8,
+        10,
+        0,
+        10,
         6 + MediaQuery.of(context).padding.bottom,
       ),
-      child: Row(
-        children: <Widget>[
-          _navItem(
-            s,
-            index: 0,
-            icon: Icons.forum_outlined,
-            activeIcon: Icons.forum_rounded,
+      child: GlassTabBar.bottom(
+        // ---- 高度 ----
+        //
+        // 默认 barHeight 64 + verticalPadding 20×2 = 104，太高，
+        // 会把输入栏和它之间的间距撑开；而上一版收到 56 + 6 = 68 又太矮
+        // （"上下太窄"）。64 + 10×2 = 84 是这两次反馈的折中。
+        barHeight: 64,
+        verticalPadding: 10,
+        // ---- 颜色：发白的修复在这里 ----
+        settings: LiquidGlassSettings(
+          // **深色下换成明确的深色玻璃**，而不是包默认的"白色 8%"。
+          // 亮色保持包的默认值不变。
+          glassColor: dark
+              ? const Color.fromRGBO(28, 28, 30, 0.55)
+              : const Color.fromRGBO(210, 220, 240, 0.12),
+          // 以下都是包为亮/暗分别调好的值，原样保留。
+          thickness: dark ? 10 : 12,
+          blur: dark ? 4 : 5,
+          lightAngle: 2.356,
+          lightIntensity: dark ? 0.7 : 0.85,
+          ambientStrength: dark ? 0.0 : 0.15,
+          refractiveIndex: 1.2,
+          saturation: 1.2,
+          chromaticAberration: dark ? 0.01 : 0.02,
+        ),
+        tabs: <GlassTab>[
+          GlassTab(
+            icon: _tabIcon(
+              icon: Icons.forum_outlined,
+              activeIcon: Icons.forum_rounded,
+              active: _index == 0,
+              color: _index == 0 ? AppColors.accent : idle,
+            ),
+            activeIcon: _tabIcon(
+              icon: Icons.forum_outlined,
+              activeIcon: Icons.forum_rounded,
+              active: true,
+              color: AppColors.accent,
+            ),
             label: '对话',
           ),
-          _navItem(
-            s,
-            index: 1,
-            icon: Icons.sticky_note_2_outlined,
-            activeIcon: Icons.sticky_note_2_rounded,
+          // 笔记**不带角标**。
+          //
+          // 原来挂了一个"笔记条数"的红色角标，两个问题：
+          // · 笔记条数不是**待处理**的东西 —— 看一眼不会产生任何行动。
+          // · 角标用的是全局 danger 红，那是"出事了"的语言。
+          //   一个纯数量提示天天报警，久了用户就不看角标了，
+          //   等真正的逾期提示出现时也照样忽略。
+          //
+          // 任务角标保留：那个是**待办数**，逾期时会变红，有行动含义。
+          GlassTab(
+            icon: _tabIcon(
+              icon: Icons.sticky_note_2_outlined,
+              activeIcon: Icons.sticky_note_2_rounded,
+              active: _index == 1,
+              color: _index == 1 ? AppColors.accent : idle,
+            ),
+            activeIcon: _tabIcon(
+              icon: Icons.sticky_note_2_outlined,
+              activeIcon: Icons.sticky_note_2_rounded,
+              active: true,
+              color: AppColors.accent,
+            ),
             label: '笔记',
-            badge: widget.notes.items.isEmpty
-                ? null
-                : widget.notes.items.length,
           ),
-          _navItem(
-            s,
-            index: 2,
-            icon: Icons.check_circle_outline_rounded,
-            activeIcon: Icons.check_circle_rounded,
+          GlassTab(
+            icon: _tabIcon(
+              icon: Icons.check_circle_outline_rounded,
+              activeIcon: Icons.check_circle_rounded,
+              active: _index == 2,
+              color: _index == 2 ? AppColors.accent : idle,
+              badge: pending == 0 ? null : pending,
+              alert: overdue > 0,
+            ),
+            activeIcon: _tabIcon(
+              icon: Icons.check_circle_outline_rounded,
+              activeIcon: Icons.check_circle_rounded,
+              active: true,
+              color: AppColors.accent,
+              badge: pending == 0 ? null : pending,
+              alert: overdue > 0,
+            ),
             label: '任务',
-            badge: pending == 0 ? null : pending,
-            alert: overdue > 0,
           ),
         ],
+        selectedIndex: _index,
+        onTabSelected: (int i) => setState(() => _index = i),
+        // 指示器和外层胶囊**同心**：给足够大的值让 Flutter 夹到半高。
+        // 这个控件**确实**对哨兵值有特判（`GlassButton` 没有，那边不能用）。
+        indicatorBorderRadius: 100,
+        indicatorExpansion:
+            const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        horizontalPadding: 22,
+        // 选中 = 图标和文字变成强调色，未选中是中灰。这就是 iOS 标签栏的做法。
+        selectedIconColor: AppColors.accent,
+        selectedLabelColor: AppColors.accent,
+        unselectedIconColor: idle,
+        unselectedLabelColor: idle,
       ),
     );
   }
 
-  Widget _navItem(
-    AppSurface s, {
-    required int index,
+  /// 标签图标，可带角标。
+  ///
+  /// `GlassTab.icon` 收的是 Widget，角标直接叠在图标上。代价是**颜色必须自己给**：
+  /// 平时 `Icon` 会从父级 `IconTheme` 继承选中/未选中的颜色，
+  /// 套了一层 `Stack` 之后这条路就断了，所以下面每个图标都要显式传 color。
+  Widget _tabIcon({
     required IconData icon,
     required IconData activeIcon,
-    required String label,
+    required bool active,
+    required Color color,
     int? badge,
     bool alert = false,
   }) {
-    final bool active = _index == index;
-    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final Widget glyph =
+        Icon(active ? activeIcon : icon, size: 24, color: color);
+    if (badge == null) return glyph;
 
-    return Expanded(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.field),
-        onTap: () => setState(() => _index = index),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              // M3 NavigationBar 的「胶囊型选中指示器」——
-              // 这是 Material You 最好认的一个特征：选中项背后有一块
-              // secondaryContainer 色的药丸，图标和文字都换成对应前景色。
-              AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    // 宽度**必须固定**。之前是 `active ? 60 : 0`，
-                    // 未选中时容器宽度为 0，里面的图标被压成 0 宽 ——
-                    // 三个项的图标位置就全错开了。
-                    // M3 的指示器本来就是定宽的，只让**颜色**做动画。
-                    width: 60,
-                    height: 30,
-                    decoration: ShapeDecoration(
-                      color: active
-                          ? scheme.secondaryContainer
-                          : Colors.transparent,
-                      shape: const StadiumBorder(),
-                    ),
-                    child: Center(
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: <Widget>[
-                          Icon(
-                            active ? activeIcon : icon,
-                            size: 22,
-                            color: active
-                                ? scheme.onSecondaryContainer
-                                : scheme.onSurfaceVariant,
-                          ),
-                          if (badge != null)
-                            Positioned(
-                              right: -11,
-                              top: -6,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 4.5, vertical: 1),
-                                constraints: const BoxConstraints(minWidth: 15),
-                                decoration: BoxDecoration(
-                                  // 有逾期任务时角标变红，这是唯一需要立刻注意的状态
-                                  color: alert ? scheme.error : scheme.primary,
-                                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                                ),
-                                child: Text(
-                                  badge > 99 ? '99+' : '$badge',
-                                  textAlign: TextAlign.center,
-                                  style: AppFonts.body(
-                                    size: 9.5,
-                                    weight: FontWeight.w700,
-                                    color: alert
-                                        ? scheme.onError
-                                        : scheme.onPrimary,
-                                    height: 1.2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    label,
-                    style: AppFonts.body(
-                      size: 11,
-                      weight: active ? FontWeight.w700 : FontWeight.w500,
-                      color: active
-                          ? scheme.onSurface
-                          : scheme.onSurfaceVariant,
-                      height: 1.2,
-                    ),
-                  ),
-                ],
+    return Stack(
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        glyph,
+        Positioned(
+          right: -11,
+          top: -5,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
+            constraints: const BoxConstraints(minWidth: 16),
+            decoration: BoxDecoration(
+              color: AppColors.danger,
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+            ),
+            child: Text(
+              badge > 99 ? '99+' : '$badge',
+              textAlign: TextAlign.center,
+              style: AppFonts.body(
+                size: 9.5,
+                weight: FontWeight.w600,
+                color: Colors.white,
+                height: 1.2,
+              ),
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -259,12 +302,23 @@ class AppHeader extends StatelessWidget {
 
     return GlassBar(
       hairlineBottom: true,
-      padding: EdgeInsets.fromLTRB(18, topInset + 6, 12, 12),
+      padding: EdgeInsets.fromLTRB(18, topInset + 8, 12, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Row(
             children: <Widget>[
+              // ---- `leading` 必须排在最前（左上角）----
+              //
+              // 这是个**位置性**的东西，不是审美偏好：返回按钮在左上角是
+              // Android 和 iOS 共同的肌肉记忆，用户闭着眼也知道往哪点。
+              //
+              // 之前 `leading` 被排在 `Expanded(标题)` **后面**，于是它跑到了
+              // 右上角 —— 每个用 AppHeader 的页面（设置、TeenSpace、工作空间、
+              // 记忆、规则、Python 控制台、笔记编辑、浏览器）返回键全在右边。
+              // 一处顺序写错，八处页面一起错，而且看起来像"每个页面都做错了"。
+              ?leading,
+              if (leading != null) const SizedBox(width: 4),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -273,10 +327,17 @@ class AppHeader extends StatelessWidget {
                     Text(
                       title,
                       style: AppFonts.body(
+                        // 页面大标题。曾经是 25 + w700 —— 那是照搬 iOS 大标题的
+                        // 字号，但没考虑中文：同样磅值下汉字比拉丁字母的视觉重量
+                        // 大得多，25px 的中文标题会显得又粗又占地方。
+                        // 收到 22 + w600 之后层级还在，但不再压着下面的内容。
                         size: 22,
-                        weight: FontWeight.w700,
+                        weight: FontWeight.w600,
                         color: s.text,
                         height: 1.2,
+                        // iOS 大标题的负字距（tracking）是 -0.4pt 左右，
+                        // 标题越大字距越收 —— 不收的话会显得松散、不像 iOS。
+                        letterSpacing: -0.3,
                       ),
                     ),
                     if (subtitle != null) ...<Widget>[
@@ -286,13 +347,12 @@ class AppHeader extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppFonts.body(
-                            size: 12.5, color: s.muted, height: 1.25),
+                            size: 13, color: s.muted, height: 1.25),
                       ),
                     ],
                   ],
                 ),
               ),
-              ?leading,
               ...actions,
             ],
           ),

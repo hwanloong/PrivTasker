@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/ids.dart';
 import '../core/models.dart';
 import '../plugins/plugin.dart';
 import '../theme/app_theme.dart';
@@ -13,7 +14,6 @@ Future<void> showPluginsSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext ctx) => _PluginsSheet(
       store: store,
       builtinNames: builtinNames,
@@ -57,11 +57,6 @@ class _PluginsSheetState extends State<_PluginsSheet> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.85,
       ),
-      decoration: BoxDecoration(
-        color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(top: BorderSide(color: s.border, width: 0.8)),
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -86,7 +81,7 @@ class _PluginsSheetState extends State<_PluginsSheet> {
                         '自定义插件',
                         style: AppFonts.body(
                           size: 17,
-                          weight: FontWeight.w700,
+                          weight: FontWeight.w600,
                           color: s.text,
                           height: 1.2,
                         ),
@@ -241,7 +236,7 @@ class _PluginsSheetState extends State<_PluginsSheet> {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '删除插件？',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
         content: Text(
           '将删除「${p.title.trim().isEmpty ? p.name : p.title}」。',
@@ -353,8 +348,7 @@ class _PluginEditorState extends State<_PluginEditor> {
 
   void _save() {
     final CustomPlugin p = CustomPlugin(
-      id: widget.existing?.id ??
-          DateTime.now().microsecondsSinceEpoch.toString(),
+      id: widget.existing?.id ?? newId(),
       name: _name.text.trim(),
       title: _title.text.trim(),
       description: _desc.text.trim(),
@@ -409,7 +403,7 @@ class _PluginEditorState extends State<_PluginEditor> {
           widget.existing == null ? '新建插件' : '编辑插件',
           style: AppFonts.body(
             size: 17,
-            weight: FontWeight.w700,
+            weight: FontWeight.w600,
             color: s.text,
             height: 1.2,
           ),

@@ -82,6 +82,7 @@ class WebFetcher {
       final http.Response resp = await NetError.retry(
         () async {
           final http.Client client = http.Client();
+          final Future<http.Response> read;
           try {
             final http.Request req = http.Request('GET', uri)
               ..headers.addAll(<String, String>{
@@ -90,10 +91,11 @@ class WebFetcher {
               });
             final http.StreamedResponse sr =
                 await client.send(req).timeout(timeout);
-            return _readCapped(sr);
+            read = _readCapped(sr);
           } finally {
             client.close();
           }
+          return read;
         },
         // **只试一次。**
         //

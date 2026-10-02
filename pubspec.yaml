@@ -3,10 +3,15 @@ description: "PrivTasker — 手机上的 AI agent：Shizuku 系统能力 + 内�
 publish_to: 'none'
 
 # 2.0.0 —— 相对 1.0.0 是能力层面的换代，不是修补：
-# 内嵌 CPython、Termux 连接、笔记与任务、导入导出、Material You 主题。
-# +20 是 versionCode：Android 用它判断"哪个更新"，**必须单调递增**，
+# 内嵌 CPython、Termux 连接、笔记与任务、导入导出。
+#
+# 2.1.0 —— 界面整体改成 iOS 系统观感：分组灰底 + 白卡、无水波纹、
+# 去掉 M3 的胶囊选中指示器、iOS 系统绿开关、可切换的字体方案，
+# 以及换成低多边形的照片类启动图标。
+#
+# +21 是 versionCode：Android 用它判断"哪个更新"，**必须单调递增**，
 # 所以不能跟着 versionName 一起重置成 1。
-version: 2.0.0+20
+version: 2.2.0+22
 
 environment:
   sdk: ^3.13.3
@@ -37,6 +42,22 @@ dependencies:
   flutter_math_fork: ^0.7.2
   # 离线 OCR（识图工具的本地方案，不需要额外 API key）
   google_mlkit_text_recognition: ^0.13.0
+
+  # iOS 26 风格的液态玻璃（导航栏 / 标签栏 / 面板）。
+  #
+  # 选它的理由：
+  # · **零第三方 pubspec 依赖** —— 自带 GLSL fragment shader，纯 Flutter SDK。
+  #   这对本项目很关键：依赖越少，AGP 9 / NDK 那套构建兼容问题就越少
+  #   （已经因为 flutter_inappwebview 的 AGP 9 问题 vendor 过一个包了）。
+  # · MIT，且把上游 liquid_glass_renderer / motor 的许可文本一起带上了。
+  # · Android 上 Impeller 的 Vulkan 和 GLES 两条路径都有优化，不会一开就卡。
+  #
+  # 用的时候有两条硬约束（踩到了会很难查）：
+  # · 必须在 MaterialApp.builder 里垫一层透明 Material，否则文字会出现
+  #   调试用的黄色下划线 —— 这个库是 Material-free 的，不提供 Material 祖先。
+  # · 玻璃要"折射"背后**真实存在的东西**。页面得给一个背景（图片/渐变/纯色），
+  #   否则玻璃看起来是平的、像没生效。
+  liquid_glass_widgets: ^1.8.1
 
 dev_dependencies:
   flutter_test:
@@ -86,3 +107,19 @@ flutter:
           weight: 700
         - asset: assets/fonts/consolai.ttf
           style: italic
+
+    # 苹方（PingFang SC）—— 中英文都用它。
+    #
+    # **这是苹果的系统字体，不能随仓库分发**，所以 `assets/fonts/*.ttf`
+    # 在 .gitignore 里被排除，仓库里只有 assets/fonts/README.md 说明怎么准备。
+    #
+    # 注意：**声明了就必须存在**。Flutter 不支持"可选字体资源" ——
+    # 打包时找不到这个文件，构建会直接失败。这和 Times / 宋体 / Consolas
+    # 是同一个约定，所以不算新增负担，但克隆仓库的人要知道清单里多了这一项。
+    #
+    # 只带 Regular 一个字重：苹方本身有 6 个字重，但每个约 11MB，
+    # 全带上会让 APK 多出 60MB。粗体由 Flutter 合成 —— 对这种黑体，
+    # 合成粗体的观感是可以接受的。
+    - family: PingFang
+      fonts:
+        - asset: assets/fonts/pingfang.ttf

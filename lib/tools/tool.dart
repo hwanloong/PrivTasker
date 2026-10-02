@@ -78,6 +78,19 @@ abstract class AgentTool {
   /// shell 类工具会走 [RiskClassifier]，其它工具按操作语义给出。
   RiskAssessment riskFor(Map<String, dynamic> args);
 
+  /// 是否**跳过确认框、直接执行**。
+  ///
+  /// 默认 false —— 风险不是 safe 的操作都要用户点一下。
+  ///
+  /// 为什么要单独开这个口子，而不是直接把 [riskFor] 改成恒返回 safe：
+  /// 两者是**不同的问题**。风险等级是"这次调用有多危险"，用来上色、给用户看、
+  /// 写进日志；而确认框问的是"要不要让用户点一下"。把风险等级改成 safe
+  /// 等于**谎报**，工具行上的红点会变成绿的，用户就再也看不出刚才那段
+  /// 代码删了文件 —— 那是把安全性做成了装饰。
+  ///
+  /// 所以：等级照实报，确认单独关。
+  bool get autoApprove => false;
+
   /// 执行并返回给模型看的文本结果
   Future<String> run(ToolContext ctx, Map<String, dynamic> args);
 

@@ -5,6 +5,10 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+// 液态玻璃按前缀导入：这个包也导出 `GlassButton` / `GlassIconButton`，
+// 而本项目在 theme/glass.dart 里有同名但 API 不同的控件。
+// 不隔离的话，本文件里所有 `GlassButton` 的用法会瞬间指向错误的那个。
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../ai/agent.dart';
@@ -24,6 +28,7 @@ import '../theme/glass.dart';
 import '../tools/android_tools.dart';
 import '../tools/browser_tool.dart';
 import '../tools/extra_tools.dart';
+import '../tools/memory_tool.dart';
 import '../tools/productivity_tools.dart';
 import '../tools/python_tool.dart';
 import '../tools/rule_tool.dart';
@@ -70,6 +75,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   AgentRunner? _runner;
   bool _busy = false;
+
+  /// 「+」面板上次停在哪个标签页。
+  ///
+  /// 记在 State 里而不是每次重置为 0：用户连调两次参数是常态，
+  /// 每次都弹回第一个标签会让他重新点一遍。
+  int _attachTab = 0;
 
   /// 是否已经滚到底部。用来决定要不要显示「回到底部」按钮。
   bool _atBottom = true;
@@ -223,6 +234,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // 拦下并要求用户确认。
     r.register(const RuleTool());
 
+    // 长期记忆。和 RuleTool 同一个理由：让 agent 自己判断什么值得记，
+    // 而不是让用户去设置页手填。
+    r.register(const MemoryTool());
+
     for (final PluginTool t in widget.plugins.enabledTools()) {
       if (r.byName(t.name) != null) continue;
       if (!widget.shizuku.ready && t.plugin.kind == PluginKind.shell) continue;
@@ -334,7 +349,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '抓取失败',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
         content: Text(
           '没能抓到 $url 的内容。\n\n'
@@ -366,7 +381,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(
           '插入网页或接口',
-          style: AppFonts.body(size: 16.5, weight: FontWeight.w700, height: 1.3),
+          style: AppFonts.body(size: 16.5, weight: FontWeight.w600, height: 1.3),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -423,15 +438,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return result;
   }
 
-  /// 思考深度的中文名。放在这里而不是模型层 —— 它是纯展示用的措辞，
-  /// 和存储的值（low/high/max）分开，改文案不用动数据。
-  static String _effortLabel(String effort) => switch (effort) {
-        'low' => '浅（快）',
-        'high' => '深（默认）',
-        'max' => '最深（慢）',
-        _ => effort,
-      };
-
   /// 把「思考深度」映射成滑条的 0~3 档。
   ///
   /// 用户要的是**一根滑条**，而后端只有 low/high/max 三个值 ——
@@ -446,171 +452,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     };
   }
 
-  /// 滑条档位 → 存进设置的措辞
-  static String _effortSliderLabel(Settings set) =>
-      switch (_effortSliderValue(set)) {
-        0 => '关闭',
-        1 => '浅',
-        2 => '深',
-        _ => '最深',
-      };
-
   static const List<String> _effortNames = <String>[
     '关闭',
     '浅（快）',
     '深（默认）',
     '最深（慢）',
   ];
-
-  /// 对话参数面板：思考深度 / 温度 / 工具轮数。
-  ///
-  /// 合成一个面板而不是三个入口 —— 它们是同一类东西（"这轮对话怎么跑"），
-  /// 而且用户调整时往往是连着调几个。
-  Future<void> _showParamSheet() async {
-    final AppSurface s = AppSurface.of(context);
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext ctx) => StatefulBuilder(
-        builder: (BuildContext ctx, StateSetter setSheet) {
-          final Settings set = widget.settings;
-          final int effort = _effortSliderValue(set);
-
-          void save(void Function() mutate) {
-            set.update(mutate);
-            setSheet(() {});
-            setState(() {}); // 让「+」菜单的描述也跟着更新
-          }
-
-          return Container(
-            decoration: BoxDecoration(
-              color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-              border: Border(top: BorderSide(color: s.border, width: 0.8)),
-            ),
-            padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: s.border,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  '对话参数',
-                  style: AppFonts.body(
-                    size: 17,
-                    weight: FontWeight.w700,
-                    color: s.text,
-                    height: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // ---- 思考深度 ----
-                _paramRow(s, '思考深度', _effortNames[effort]),
-                Slider(
-                  value: effort.toDouble(),
-                  min: 0,
-                  max: 3,
-                  divisions: 3,
-                  label: _effortNames[effort],
-                  onChanged: (double v) {
-                    final int idx = v.round();
-                    save(() {
-                      if (idx == 0) {
-                        set.thinkingEnabled = false;
-                      } else {
-                        set.thinkingEnabled = true;
-                        set.reasoningEffort =
-                            <String>['low', 'low', 'high', 'max'][idx];
-                      }
-                    });
-                  },
-                ),
-                _paramHint(
-                  s,
-                  '先"想"再答，质量更好但更慢、更费 token。',
-                ),
-
-                const SizedBox(height: 14),
-
-                // ---- 温度 ----
-                _paramRow(s, '温度', set.temperature.toStringAsFixed(1)),
-                Slider(
-                  value: set.temperature.clamp(0.0, 2.0),
-                  min: 0,
-                  max: 2,
-                  divisions: 20,
-                  label: set.temperature.toStringAsFixed(1),
-                  onChanged: (double v) =>
-                      save(() => set.temperature = v),
-                ),
-                _paramHint(
-                  s,
-                  '越低越稳定保守，越高越发散有创意。'
-                  // 这条必须说清楚，否则用户会觉得"调了没用"
-                  '⚠️ **思考模式开启时这个值不生效** —— '
-                  '官方说明"设置不报错但也不生效"，想要它起作用先把思考深度调到关闭。',
-                ),
-
-                const SizedBox(height: 14),
-
-                // ---- 工具调用轮数 ----
-                _paramRow(s, '工具调用上限', '${set.maxToolRounds} 轮'),
-                Slider(
-                  value: set.maxToolRounds.toDouble().clamp(1, 100),
-                  min: 1,
-                  max: 100,
-                  divisions: 99,
-                  label: '${set.maxToolRounds}',
-                  onChanged: (double v) =>
-                      save(() => set.maxToolRounds = v.round()),
-                ),
-                // 滑杆在 1~100 这个跨度上不好精确点，所以补两个微调按钮。
-                // 想要 37 这种具体值时光靠滑杆会调不准。
-                Row(
-                  children: <Widget>[
-                    _stepButton(s, '−', () {
-                      if (set.maxToolRounds > 1) {
-                        save(() => set.maxToolRounds = set.maxToolRounds - 1);
-                      }
-                    }),
-                    const SizedBox(width: 8),
-                    _stepButton(s, '＋', () {
-                      if (set.maxToolRounds < 100) {
-                        save(() => set.maxToolRounds = set.maxToolRounds + 1);
-                      }
-                    }),
-                    const Spacer(),
-                    _stepButton(s, '常用', () {
-                      save(() => set.maxToolRounds = 8);
-                    }),
-                  ],
-                ),
-                _paramHint(
-                  s,
-                  '一轮 = 模型调一次工具。复杂任务（多步搜索、写代码再调试）需要更多轮；'
-                  '调太小会让它做一半就停。默认 8 轮，上限 100。',
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
 
   Widget _paramRow(AppSurface s, String label, String value) {    return Row(
       children: <Widget>[
@@ -652,7 +499,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Widget _paramHint(AppSurface s, String text) {
     return Padding(
       padding: const EdgeInsets.only(top: 2),
-      child: Text(
+      child: mdText(
         text,
         style: AppFonts.body(size: 11, color: s.muted, height: 1.55),
       ),
@@ -681,38 +528,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 选思考深度。
-  Future<void> _pickThinking() async {
-    final List<(String, String)> presets = <(String, String)>[
-      ('__off__', '关闭思考 · 最快，适合简单问答'),
-      ('low', '浅 · 快，适合改文字、查东西'),
-      ('high', '深 · 默认，日常够用'),
-      ('max', '最深 · 慢，适合复杂推理和写代码'),
-    ];
-
-    final String current =
-        widget.settings.thinkingEnabled ? widget.settings.reasoningEffort : '__off__';
-
-    final String? picked = await _pickSheet(
-      title: '思考深度',
-      current: current,
-      options: presets,
-      note: '思考模式会先"想"再答，质量更好但更慢、更费 token。'
-          '关闭后温度等采样参数才会生效。',
-    );
-    if (picked == null) return;
-
-    await widget.settings.update(() {
-      if (picked == '__off__') {
-        widget.settings.thinkingEnabled = false;
-      } else {
-        widget.settings.thinkingEnabled = true;
-        widget.settings.reasoningEffort = picked;
-      }
-    });
-    if (mounted) setState(() {});
-  }
-
   /// 通用的单选面板。模型和思考深度共用 —— 两个面板长得一模一样，
   /// 各写一遍迟早会不一致。
   Future<String?> _pickSheet({
@@ -725,14 +540,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     return showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext ctx) => Container(
-        decoration: BoxDecoration(
-          color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: s.border, width: 0.8)),
-        ),
-        child: SafeArea(
+      builder: (BuildContext ctx) => SafeArea(
           top: false,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -751,7 +559,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 title,
                 style: AppFonts.body(
                   size: 16,
-                  weight: FontWeight.w700,
+                  weight: FontWeight.w600,
                   color: s.text,
                   height: 1.2,
                 ),
@@ -807,112 +615,368 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ],
           ),
         ),
-      ),
     );
   }
 
+  /// 「+」面板：四个标签页。
+  ///
+  /// 之前是一串平铺的选项，模型、参数、附件混在一起。改成标签页是因为
+  /// **这四类东西性质不同**：
+  /// · 模型设置 —— 这一轮**怎么想**
+  /// · 附件添加 —— 给模型**看什么**
+  /// · 工具调用 —— 它**能做什么**
+  /// · 性能工具 —— **花了多少**
+  ///
+  /// 平铺时用户每次都要在一堆无关选项里找自己那一项；分组之后
+  /// 手指落到哪个标签是有预期的。
   void _showAttachMenu() {
-    final AppSurface s = AppSurface.of(context);
+    // **不用液态玻璃。**
+    //
+    // 这个面板通篇是内容（模型名、滑杆、附件选项、工具列表），
+    // 玻璃是为"浮在内容之上的控制层"准备的 —— 内容层该是不透明的。
+    // 半透明的底会让里面的白卡片和文字对比度不稳，读起来更费劲。
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext ctx) => Container(
-        decoration: BoxDecoration(
-          color: s.isDark ? AppColors.darkBg : AppColors.lightBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: s.border, width: 0.8)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const SizedBox(height: 10),
-              Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: s.border,
-                  borderRadius: BorderRadius.circular(2),
+      // 标签页之间内容高度差别很大，锁死高度会让高的那页被裁掉。
+      isScrollControlled: true,
+      builder: (BuildContext ctx) {
+        // 标签索引放在 StatefulBuilder **外面**：放里面的话每次
+        // setSheet 都会重新初始化回 0，点了没反应。
+        //
+        // 这里 clamp 一下：标签从 4 个减到 3 个之后，上次停在第 4 个的话
+        // 现在就越界了（`switch` 会落到默认分支，但索引本身得先夹住）。
+        int tab = _attachTab.clamp(0, 2);
+        return StatefulBuilder(
+          builder: (BuildContext ctx, StateSetter setSheet) {
+            final AppSurface s = AppSurface.of(ctx);
+            final Settings set = widget.settings;
+
+            void save(void Function() mutate) {
+              set.update(mutate);
+              setSheet(() {});
+              setState(() {}); // 「+」面板外的描述文字也要跟着更新
+            }
+
+            return SafeArea(
+              top: false,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.78,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10, bottom: 12),
+                      child: Container(
+                        width: 38,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: s.border,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                      child: lg.GlassSegmentedControl(
+                        // 顺序：**附件添加放第一位**。
+                        //
+                        // 这是「+」按钮最常被按的原因 —— 用户点它多半是想发张图
+                        // 或发个文件。模型设置和工具调用是"偶尔调一次"的东西，
+                        // 排在后面。
+                        //
+                        // 「性能工具」标签已删除：性能是**观察**类信息，
+                        // 不该和"我要发东西"混在一个面板里。它仍然可以从
+                        // 顶部的性能按钮打开。
+                        segments: const <lg.GlassSegment>[
+                          lg.GlassSegment(label: '附件添加'),
+                          lg.GlassSegment(label: '模型设置'),
+                          lg.GlassSegment(label: '工具调用'),
+                        ],
+                        // 和按钮一样用**真胶囊**。
+                        // 见 theme/glass.dart 里 GlassButton 那段注释：
+                        // 要用包自己的哨兵常量，别自己写数字。
+                        borderRadius: lg.GlassDefaults.capsuleRadius,
+                        selectedIndex: tab,
+                        onSegmentSelected: (int i) {
+                          _attachTab = i;
+                          setSheet(() => tab = i);
+                        },
+                        // **必须显式给字体**。
+                        //
+                        // 这个控件来自 liquid_glass_widgets，它走的是 Cupertino
+                        // 的默认字体，不继承本项目的 `AppFonts`。不给的话，
+                        // 用户一选「衬线」或「自定义字体」，这四个标签就会
+                        // 变成另一套字 —— 界面里冒出几处不一致，还很难看出是哪里。
+                        selectedTextStyle: AppFonts.body(
+                          size: 12,
+                          weight: FontWeight.w600,
+                          color: AppColors.accent,
+                          height: 1.2,
+                        ),
+                        unselectedTextStyle: AppFonts.body(
+                          size: 12,
+                          color: s.muted,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                        child: switch (tab) {
+                          0 => _attachFilesTab(ctx, s),
+                          1 => _attachModelTab(s, save),
+                          _ => _attachToolsTab(s),
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 14),
+            );
+          },
+        );
+      },
+    );
+  }
 
-              // ---- 会话控制（和"附件"是不同类别，所以放最上面并分隔开）----
-              //
-              // 模型和思考深度是**调一次就会影响整轮对话**的东西，
-              // 放在设置里要翻好几层；而它们的调整时机恰恰是"发消息前"，
-              // 也就是用户手指正停在「+」上的时候。
-              _attachOption(
-                s,
-                icon: Icons.memory_rounded,
-                label: '模型',
-                desc: widget.settings.model,
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _pickModel();
-                },
-              ),
-              _attachOption(
-                s,
-                icon: Icons.tune_rounded,
-                label: '对话参数',
-                desc: '思考深度 ${_effortSliderLabel(widget.settings)} · '
-                    '温度 ${widget.settings.temperature.toStringAsFixed(1)} · '
-                    '最多 ${widget.settings.maxToolRounds} 轮工具',
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _showParamSheet();
-                },
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
-                child: Divider(color: s.border, height: 1),
-              ),
+  /// 这个会话目前占了多少 token（粗略估算）。
+  int _contextTokens() => _conv.messages.fold<int>(
+        0,
+        (int sum, ChatMessage m) => sum + AppMetrics.estimate(m.content),
+      );
 
-              _attachOption(
-                s,
-                icon: Icons.photo_library_outlined,
-                label: '从相册选图片',
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _pickImage(ImageSource.gallery);
-                },
-              ),
-              _attachOption(
-                s,
-                icon: Icons.photo_camera_outlined,
-                label: '拍照',
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _pickImage(ImageSource.camera);
-                },
-              ),
-              _attachOption(
-                s,
-                icon: Icons.attach_file_rounded,
-                label: '选择文件',
-                desc: '文本类文件会把内容读给模型',
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _pickFile();
-                },
-              ),
-              _attachOption(
-                s,
-                icon: Icons.link_rounded,
-                label: '网页或接口链接',
-                desc: '抓取内容后发给模型，如 Mapbox API',
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _addWebLink();
-                },
-              ),
-              const SizedBox(height: 12),
-            ],
-          ),
+  /// 标签页 1：模型设置。
+  Widget _attachModelTab(AppSurface s, void Function(void Function()) save) {
+    final Settings set = widget.settings;
+    final int effort = _effortSliderValue(set);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        // ---- 模型 ----
+        _attachOption(
+          s,
+          icon: Icons.memory_rounded,
+          label: '模型',
+          desc: set.model,
+          pad: false,
+          onTap: _pickModel,
         ),
-      ),
+
+        const SizedBox(height: 8),
+
+        // ---- 思考深度 ----
+        _paramRow(s, '思考深度', _effortNames[effort]),
+        Slider(
+          value: effort.toDouble(),
+          min: 0,
+          max: 3,
+          divisions: 3,
+          label: _effortNames[effort],
+          onChanged: (double v) {
+            final int idx = v.round();
+            save(() {
+              if (idx == 0) {
+                set.thinkingEnabled = false;
+              } else {
+                set.thinkingEnabled = true;
+                set.reasoningEffort =
+                    <String>['low', 'low', 'high', 'max'][idx];
+              }
+            });
+          },
+        ),
+        _paramHint(s, '先"想"再答，质量更好但更慢、更费 token。'),
+
+        const SizedBox(height: 14),
+
+        // ---- 温度 ----
+        _paramRow(s, '温度', set.temperature.toStringAsFixed(1)),
+        Slider(
+          value: set.temperature.clamp(0.0, 2.0),
+          min: 0,
+          max: 2,
+          divisions: 20,
+          label: set.temperature.toStringAsFixed(1),
+          onChanged: (double v) => save(() => set.temperature = v),
+        ),
+        _paramHint(
+          s,
+          '越低越稳定保守，越高越发散有创意。'
+          // 这条必须说清楚，否则用户会觉得"调了没用"
+          '⚠️ **思考模式开启时这个值不生效** —— '
+          '官方说明"设置不报错但也不生效"，想要它起作用先把思考深度调到关闭。',
+        ),
+
+        const SizedBox(height: 14),
+
+        // ---- 工具调用轮数 ----
+        _paramRow(s, '工具调用上限', '${set.maxToolRounds} 轮'),
+        Slider(
+          value: set.maxToolRounds.toDouble().clamp(1, 100),
+          min: 1,
+          max: 100,
+          divisions: 99,
+          label: '${set.maxToolRounds}',
+          onChanged: (double v) => save(() => set.maxToolRounds = v.round()),
+        ),
+        // 滑杆在 1~100 这个跨度上不好精确点，所以补两个微调按钮。
+        // 想要 37 这种具体值时光靠滑杆会调不准。
+        Row(
+          children: <Widget>[
+            _stepButton(s, '−', () {
+              if (set.maxToolRounds > 1) {
+                save(() => set.maxToolRounds = set.maxToolRounds - 1);
+              }
+            }),
+            const SizedBox(width: 8),
+            _stepButton(s, '＋', () {
+              if (set.maxToolRounds < 100) {
+                save(() => set.maxToolRounds = set.maxToolRounds + 1);
+              }
+            }),
+            const Spacer(),
+            _stepButton(s, '常用', () {
+              save(() => set.maxToolRounds = 8);
+            }),
+          ],
+        ),
+        _paramHint(
+          s,
+          '一轮 = 模型调一次工具。复杂任务（多步搜索、写代码再调试）需要更多轮；'
+          '调太小会让它做一半就停。默认 8 轮，上限 100。',
+        ),
+      ],
+    );
+  }
+
+  /// 标签页 2：附件添加。
+  Widget _attachFilesTab(BuildContext ctx, AppSurface s) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _attachOption(
+          s,
+          icon: Icons.photo_library_outlined,
+          label: '从相册选图片',
+          desc: '模型能直接看图',
+          pad: false,
+          onTap: () {
+            Navigator.of(ctx).pop();
+            _pickImage(ImageSource.gallery);
+          },
+        ),
+        const SizedBox(height: 8),
+        _attachOption(
+          s,
+          icon: Icons.photo_camera_outlined,
+          label: '拍照',
+          pad: false,
+          onTap: () {
+            Navigator.of(ctx).pop();
+            _pickImage(ImageSource.camera);
+          },
+        ),
+        const SizedBox(height: 8),
+        _attachOption(
+          s,
+          icon: Icons.attach_file_rounded,
+          label: '选择文件',
+          desc: '文本类文件会把内容读给模型',
+          pad: false,
+          onTap: () {
+            Navigator.of(ctx).pop();
+            _pickFile();
+          },
+        ),
+        const SizedBox(height: 8),
+        _attachOption(
+          s,
+          icon: Icons.link_rounded,
+          label: '网页或接口链接',
+          desc: '抓取内容后发给模型，如 Mapbox API',
+          pad: false,
+          onTap: () {
+            Navigator.of(ctx).pop();
+            _addWebLink();
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 标签页 3：工具调用。
+  ///
+  /// 列的是**这一次对话真正注册进来的工具**，而不是一张写死的清单 ——
+  /// 所以"有没有 Shizuku"这种状态会直接反映在列表长度上，
+  /// 而不是靠一句含糊的提示。
+  Widget _attachToolsTab(AppSurface s) {
+    final List<AgentTool> tools = _buildRegistry().all;
+    final bool z = widget.shizuku.ready;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          '本次对话可用 ${tools.length} 个工具',
+          style: AppFonts.body(size: 12.8, color: s.muted, height: 1.3),
+        ),
+        const SizedBox(height: 10),
+        for (final AgentTool t in tools)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 7),
+            child: SurfaceCard(
+              padding: const EdgeInsets.fromLTRB(13, 10, 13, 10),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          t.title,
+                          style: AppFonts.body(
+                            size: 13.5,
+                            weight: FontWeight.w600,
+                            color: s.text,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          t.name,
+                          style: AppFonts.code(size: 11.5, color: s.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (!z) ...<Widget>[
+          const SizedBox(height: 6),
+          Text(
+            '未取得系统权限，所以 shell / 应用管理 / 文件读写 / 系统设置 / 截屏 '
+            '这几个工具现在不在列表里。授予权限后它们会自动出现。',
+            style:
+                AppFonts.body(size: 12, color: AppColors.warning, height: 1.5),
+          ),
+        ],
+        if (!PythonService.instance.available) ...<Widget>[
+          const SizedBox(height: 8),
+          Text(
+            '内嵌 Python 当前不可用'
+            '（${PythonService.instance.lastError ?? "未知原因"}）。'
+            '到「设置 → Python 控制台」能看到完整报错。',
+            style:
+                AppFonts.body(size: 12, color: AppColors.warning, height: 1.5),
+          ),
+        ],
+      ],
     );
   }
 
@@ -922,43 +986,50 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     required String label,
     String? desc,
     required VoidCallback onTap,
+    // 默认自带左右 16 的外边距，方便直接平铺。
+    // 放进标签页时要传 false —— 外面那层滚动容器已经有 padding 了，
+    // 两处叠加会变成 32，卡片被挤得又窄又难看。
+    bool pad = true,
   }) {
+    final Widget card = SurfaceCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      onTap: onTap,
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 19, color: AppColors.accent),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  style: AppFonts.body(
+                    size: 14,
+                    weight: FontWeight.w600,
+                    color: s.text,
+                    height: 1.3,
+                  ),
+                ),
+                if (desc != null) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    desc,
+                    style:
+                        AppFonts.body(size: 12, color: s.muted, height: 1.4),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!pad) return card;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: SurfaceCard(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        onTap: onTap,
-        child: Row(
-          children: <Widget>[
-            Icon(icon, size: 19, color: AppColors.accent),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    label,
-                    style: AppFonts.body(
-                      size: 14,
-                      weight: FontWeight.w600,
-                      color: s.text,
-                      height: 1.3,
-                    ),
-                  ),
-                  if (desc != null) ...<Widget>[
-                    const SizedBox(height: 2),
-                    Text(
-                      desc,
-                      style: AppFonts.body(
-                          size: 12, color: s.muted, height: 1.4),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      child: card,
     );
   }
 
@@ -1243,52 +1314,81 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // 顶部不会留出一条割裂的纯色带。
     final double topInset = MediaQuery.of(context).padding.top;
 
+    // 当前对话名。还没起名的会话（刚建、没发过消息）显示「新对话」。
+    final String title = _conv.title.trim().isEmpty ? '新对话' : _conv.title;
+
     return GlassBar(
       hairlineBottom: true,
-      padding: EdgeInsets.fromLTRB(18, topInset + 6, 12, 12),
+      padding: EdgeInsets.fromLTRB(18, topInset + 8, 12, 10),
       child: Row(
         children: <Widget>[
+          // ---- 标题 = 当前对话名，点一下打开历史记录 ----
+          //
+          // 原来这一行放的是品牌名「PrivTasker」，对话名挤在下面一行 11.5px 的灰字里。
+          // 两处都不对：
+          //   · 品牌名在**自己的应用里**是冗余信息 —— 用户不会忘了自己开的是哪个 app，
+          //     而它占掉的恰恰是头部最显眼的位置。
+          //   · 多会话场景下真正需要一眼确认的是「我在哪个对话里」。那是身份信息，
+          //     不该由一行小灰字来承担。
+          //
+          // 历史记录的入口一并并进这一行：它要表达的就是「这些对话之间可以切换」，
+          // 语义上本来就属于标题。合并之后右边少一个图标按钮，
+          // 头部只剩「系统权限状态 + 性能 + 设置」，清爽很多。
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                // 品牌名用**渐变文字**（方案取自定义图标同一条蓝紫渐变），
-                // 所以头部和图标是同一套配色。
-                GradientText(
-                  text: 'PrivTasker',
-                  style: AppFonts.body(
-                    size: 21,
-                    weight: FontWeight.w700,
-                    // 这里的颜色不生效（会被 ShaderMask 的渐变盖掉），
-                    // 但必须给一个不透明的值 —— 用半透明会让渐变整体变淡
-                    color: Colors.black,
-                    height: 1.2,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Pressable(
+                onTap: () =>
+                    showHistorySheet(context, store: widget.conversations),
+                child: Padding(
+                  // 纯文字的可点区域太小，撑一点内边距到好按的尺寸
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFonts.body(
+                            // 17.5：**iOS 导航栏标题的标准字号就是 17pt**。
+                            //
+                            // 之前是 22 —— 那是照搬"大标题"的思路，但这块地方
+                            // 不是大标题栏：它同一行里还挤着状态点、性能、设置
+                            // 三个图标，标题越大越互相压。用户的原话是
+                            // "聊天标题字太大了"。
+                            //
+                            // 17.5 而不是整 17：中文在 17pt 下略显局促，
+                            // 加半个点让汉字有呼吸空间，英文也不会显得散。
+                            size: 17.5,
+                            weight: FontWeight.w600,
+                            color: s.text,
+                            height: 1.2,
+                            // 字号小了，负字距也要跟着收 ——
+                            // -0.3 是给 22px 配的，17.5 用它会显得挤。
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      // 向下的箭头 =「这里点开还有东西」。
+                      // 少了它，用户不会想到标题是可以点的。
+                      // 跟着标题一起缩，否则箭头会比字还高。
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 20,
+                        color: s.muted,
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 2),
-                // 副标题改成**当前聊天名称** ——
-                // 原来那行是"模型名 · 工具已启用"，那是状态信息不是身份信息；
-                // 而多会话场景下，用户最需要一眼确认的是"我在哪个对话里"。
-                Text(
-                  _conv.title.trim().isEmpty ? '新对话' : _conv.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFonts.body(size: 11.5, color: s.muted, height: 1.25),
-                ),
-              ],
+              ),
             ),
           ),
           _shizukuDot(),
           const SizedBox(width: 2),
-          GlassIconButton(
-            icon: Icons.history_rounded,
-            tooltip: '历史记录',
-            size: 36,
-            iconSize: 18,
-            onTap: () => showHistorySheet(context, store: widget.conversations),
-          ),
-          const SizedBox(width: 6),
           // 插件入口已移进设置（头部太挤，而插件不是高频操作）；
           // 这里换成性能面板 —— 它在调试和观察用量时会被反复打开。
           GlassIconButton(
@@ -1299,10 +1399,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             onTap: () => showPerformanceSheet(
               context,
               settings: widget.settings,
-              contextTokens: _conv.messages.fold<int>(
-                0,
-                (int sum, ChatMessage m) => sum + AppMetrics.estimate(m.content),
-              ),
+              contextTokens: _contextTokens(),
             ),
           ),
           const SizedBox(width: 6),
@@ -1554,9 +1651,27 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       hairlineTop: true,
       padding: EdgeInsets.fromLTRB(
         14,
+        // 上 10、下 3：**输入行整体下移**。
+        //
+        // 实测过的原始数值（逻辑像素，屏幕高 844）：
+        //   输入框 700..746，底栏胶囊 754..838 → 两者间距 8
+        //   输入框在玻璃条内：上方 8.7、下方 98（下方那 98 里 90 是给标签栏让位的）
+        //
+        // 反馈是"离底栏太远、到上面太近"，也就是要让输入行往下靠。
+        // 上下改成 10 / 3 之后：与标签栏的可见间距 8 → 3，
+        // 上方的空间 8.7 → 10.7。两边同时朝用户要的方向动了。
         10,
         14,
-        10 + MediaQuery.of(context).padding.bottom,
+        // **这个 `padding.bottom` 不是系统安全区。**
+        //
+        // 外面那层 `Scaffold` 开了 `extendBody: true`：body 会铺满整屏
+        // （好让内容从标签栏底下穿过去），但 Scaffold 同时会把 body 的
+        // `MediaQuery.padding.bottom` **设成底部导航栏的高度**，
+        // 让 body 自己避开它。
+        //
+        // 所以这一行的作用是"给标签栏让位"。删掉它输入栏就会塌到标签栏底下、
+        // 两者叠在一起 —— 我试过一次，就是那个结果。
+        3 + MediaQuery.of(context).padding.bottom,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1603,7 +1718,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   decoration: ShapeDecoration(
                     color: s.surface,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.card),
+                      // 胶囊，和两侧直径 46 的圆形按钮同一曲率。
+                      // 详见 AppRadius.input 的注释 —— 这里用卡片圆角(16)
+                      // 会让"圆按钮 + 方框"并排，看着就是没对齐。
+                      borderRadius: BorderRadius.circular(AppRadius.input),
                       side: BorderSide(color: s.border, width: 1),
                     ),
                   ),
@@ -1756,33 +1874,25 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return u.host;
   }
 
+  /// 发送按钮。
+  ///
+  /// **换成液态玻璃了。**
+  ///
+  /// 原来是 Material + InkWell 的实心圆（有内容时填充强调色）。它旁边那个
+  /// 「停止」按钮用的是玻璃 —— 同一行里一个实心一个玻璃，看着就是没做完。
+  ///
+  /// 和别的按钮一样，**语义交给图标颜色**：有内容时图标是强调色，
+  /// 没内容时是灰色 + 降透明度。玻璃的观感靠折射和边缘高光，
+  /// 硬塞一块实心色进去反而把它盖住了。
   Widget _sendButton(bool hasContent) {
     final AppSurface s = AppSurface.of(context);
-    final ColorScheme c = Theme.of(context).colorScheme;
-    return Material(
-      // 用 M3 颜色角色而不是写死的常量 —— 换主题色时它要跟着变
-      color: hasContent ? c.primary : s.surface,
-      shape: CircleBorder(
-        side: BorderSide(
-          color: hasContent ? Colors.transparent : s.border,
-          width: 1,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: hasContent ? _send : null,
-        child: SizedBox(
-          // 必须和左侧「+」按钮、以及输入框最小高度一致（都是 46），
-          // 否则 CrossAxisAlignment.end 下两个按钮看起来是错位的。
-          width: 46,
-          height: 46,
-          child: Icon(
-            Icons.arrow_upward_rounded,
-            size: 22,
-            color: hasContent ? c.onPrimary : s.muted,
-          ),
-        ),
-      ),
+    return GlassIconButton(
+      icon: Icons.arrow_upward_rounded,
+      tooltip: hasContent ? '发送' : '先输入内容',
+      size: 46,
+      iconSize: 22,
+      color: hasContent ? AppColors.accent : s.muted,
+      onTap: hasContent ? _send : null,
     );
   }
 }

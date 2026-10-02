@@ -1,5 +1,22 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon (Android 8.0+).
+
+  This is a PHOTO-type icon (low-poly soldier), not a layered vector mark,
+  so it is handled differently from a drawn logo:
+
+  - background layer: the whole picture, full-bleed across the 108dp canvas;
+    the launcher masks it into a circle / squircle / rounded square.
+  - foreground layer: left empty.
+
+  Doing it the other way round (picture as foreground, shrunk into the 66dp
+  safe zone) would make the subject tiny with a ring of empty space around it,
+  which is wrong for a photo icon.
+
+  Legacy launchers (API < 26) fall back to mipmap-*/ic_launcher.png, which is
+  the same square image.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <background android:drawable="@mipmap/ic_launcher_photo"/>
+    <foreground android:drawable="@android:color/transparent"/>
 </adaptive-icon>
